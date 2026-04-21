@@ -7,6 +7,11 @@ Current widgets:
 - `keyboard-layout.sh` - reliable keyboard layout indicator for Hyprland
 - `cpu-status.py` - CPU hover widget with per-core load, temperatures, session peaks, and short load graphs
 
+Config snippets:
+
+- `examples/memory-builtin.jsonc` - icon-only built-in Waybar memory module with tooltip details
+- `examples/memory-builtin.css` - warning / critical colors for the built-in memory module
+
 ## Keyboard Layout Widget
 
 A reliable keyboard layout indicator for [Waybar](https://github.com/Alexays/Waybar) on [Hyprland](https://hyprland.org/) that works around the known IPC parsing bugs in the built-in `hyprland/language` module.
@@ -163,6 +168,28 @@ pkill -USR2 waybar
 - On many Intel CPUs, temperature sensors are exposed per physical core, not per logical thread. In that case sibling threads share the same temperature reading.
 - The `peak` value is session-tracked by the script. It is not a firmware or hardware lifetime maximum.
 - The mini graph is CPU load history, not temperature history.
+
+## Built-in Memory Widget
+
+If you do not need a custom RAM history graph yet, Waybar's built-in `memory` module is enough for a clean icon-only widget with a useful tooltip.
+
+Files:
+
+- `examples/memory-builtin.jsonc`
+- `examples/memory-builtin.css`
+
+Recommended behavior:
+
+- show only the memory icon in the bar
+- show percentage and used / total GiB on hover
+- keep color changes with `warning` / `critical` states
+
+Example tooltip output:
+
+```text
+43%
+12.7G / 31.1G
+```
 
 ## Tested On
 

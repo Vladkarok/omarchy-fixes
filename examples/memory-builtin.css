@@ -1,0 +1,7 @@
+#memory.warning {
+  color: #d79921;
+}
+
+#memory.critical {
+  color: #fb4934;
+}
