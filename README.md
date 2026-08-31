@@ -411,6 +411,9 @@ Included files:
 - `omarchy/bin/omarchy-powerprofiles-apply`
 - `omarchy/bin/omarchy-powerprofiles-set`
 - `omarchy/bin/omarchy-brightness-display`
+- `omarchy/bin/omarchy-agent-usage-grok`: Grok collector for the `omarchy.agents` bar panel
+- `omarchy/systemd/omarchy-agent-usage-grok.service`: writes the Grok usage record
+- `omarchy/systemd/omarchy-agent-usage-grok.timer`: refreshes that record every 15 minutes
 - `omarchy/patches/omarchy-menu-power-profile.patch`
 - `tensaku/config.toml`: closes the screenshot editor after copy/save/save-as
 
@@ -447,6 +450,47 @@ Notes:
 
 - The governor recovery path uses `sudo -n` when it is not already running as root.
 - The helper only resets governors when a non-`performance` profile should be active and the kernel is still pinned to `performance`.
+
+### Grok in the Agents Panel
+
+The `omarchy.agents` bar widget ships collectors for Claude, Codex, and Fireworks
+only. Grok has no collector upstream — seven PRs adding one were open against
+`omacom/omarchy` as of 2026-08-31, none merged. `omarchy/bin/omarchy-agent-usage-grok`
+is the collector from [PR 7393](https://github.com/omacom/omarchy/pull/7393),
+which is the only one of the seven that touches no QML, so it drops in without
+forking the plugin.
+
+Token stats come from `turn_completed` events in
+`~/.grok/sessions/*/*/updates.jsonl`. The plan label and the weekly pool come
+from `cli-chat-proxy.grok.com`, the same endpoint Grok's own `/usage` command
+uses, authenticated with the bearer token already in `~/.grok/auth.json`.
+
+`omarchy-agent-usage-update` only globs `$OMARCHY_PATH/bin`, which the
+`omarchy-dev` package owns, so the collector cannot register itself there. The
+systemd user timer writes the record straight into the directory the panel
+watches instead. The panel picks up any record that lands there regardless of
+who wrote it, so nothing else needs changing.
+
+#### Install
+
+```bash
+install -Dm755 omarchy/bin/omarchy-agent-usage-grok ~/.local/bin/omarchy-agent-usage-grok
+install -Dm644 omarchy/systemd/omarchy-agent-usage-grok.service ~/.config/systemd/user/omarchy-agent-usage-grok.service
+install -Dm644 omarchy/systemd/omarchy-agent-usage-grok.timer ~/.config/systemd/user/omarchy-agent-usage-grok.timer
+systemctl --user daemon-reload && systemctl --user enable --now omarchy-agent-usage-grok.timer
+```
+
+Notes:
+
+- The panel only re-lists the usage directory when its own update process exits,
+  so a new record shows up at the next refresh. `omarchy-shell omarchy.agents refresh`
+  forces it.
+- The Grok mark needs `assets/grok.svg` inside the plugin directory, which lives
+  under `/usr/share/omarchy`. Without cloning the plugin, Grok falls back to the
+  generic bar glyph.
+- Retire all of this once a Grok collector merges upstream: the packaged
+  `omarchy-agent-usage-grok` will overwrite the same `grok.json`, so remove the
+  timer and the `~/.local/bin` copy to avoid two writers.
 
 ### Screenshot Annotation: Satty → Tensaku
 

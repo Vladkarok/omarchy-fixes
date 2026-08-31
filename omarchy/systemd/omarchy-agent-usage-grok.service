@@ -1,0 +1,12 @@
+[Unit]
+Description=Write the Grok usage record for the omarchy.agents panel
+Documentation=https://github.com/omacom/omarchy/pull/7393
+
+[Service]
+Type=oneshot
+# Match the 0600 records omarchy-agent-usage-update writes via mktemp.
+UMask=0077
+# omarchy-agent-usage-update only globs $OMARCHY_PATH/bin, which is package-owned,
+# so the collector writes its record straight into the directory the panel watches.
+ExecStart=/bin/sh -c 'exec %h/.local/bin/omarchy-agent-usage-grok > "$${XDG_STATE_HOME:-%h/.local/state}/omarchy/agents/usage/.grok.json.tmp"'
+ExecStartPost=/bin/sh -c 'exec mv "$${XDG_STATE_HOME:-%h/.local/state}/omarchy/agents/usage/.grok.json.tmp" "$${XDG_STATE_HOME:-%h/.local/state}/omarchy/agents/usage/grok.json"'
