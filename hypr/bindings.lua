@@ -37,7 +37,7 @@ rebind("SUPER + SHIFT + L", "Last War", { launch = "gtk-launch LastWar" })
 rebind("SUPER + SHIFT + A", "ChatGPT Desktop", { launch = "gtk-launch chatgpt" })
 
 -- Replace Omarchy's HEY Calendar web app binding with Claude Desktop.
-rebind("SUPER + SHIFT + C", "Claude Desktop", { launch = "gtk-launch claude-desktop" })
+rebind("SUPER + SHIFT + C", "Claude Desktop", { launch = "gtk-launch com.anthropic.Claude" })
 
 -- Don't lock the screen when the lid closes. Omarchy's default runs
 -- omarchy-system-lid-close, which locks (unless an external monitor is

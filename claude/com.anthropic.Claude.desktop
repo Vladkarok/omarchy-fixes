@@ -1,0 +1,36 @@
+[Desktop Entry]
+# User override of /usr/share/applications/com.anthropic.Claude.desktop
+#
+# Adds --password-store=gnome-libsecret. Without it Electron's backend
+# autodetection does not recognise XDG_CURRENT_DESKTOP=Hyprland, falls back to
+# the plaintext "basic_text" store, reports isEncryptionAvailable=false, and
+# then refuses to persist OAuth tokens at all — so the app asks for a fresh
+# login on every start. gnome-keyring is running and owns
+# org.freedesktop.secrets, so the libsecret backend works when selected
+# explicitly.
+#
+# Adds the Ozone flags to run natively on Wayland instead of XWayland. Upstream
+# ships no *-flags.conf reader, so the flags have to go on the Exec lines. Under
+# XWayland the window cannot receive input from wtype, which is what the
+# on-screen keyboard plugin types with, so keystrokes were silently dropped.
+Name=Claude
+Comment=Desktop application for Claude.ai
+GenericName=AI Assistant
+Keywords=AI;Chat;Assistant;Claude;Code;LLM;
+Exec=claude-desktop --password-store=gnome-libsecret --ozone-platform=wayland --ozone-platform-hint=wayland --enable-features=UseOzonePlatform,WaylandWindowDecorations %U
+Icon=claude-desktop
+Type=Application
+StartupNotify=true
+StartupWMClass=com.anthropic.Claude
+SingleMainWindow=true
+Categories=Utility;Development;
+MimeType=x-scheme-handler/claude;
+Actions=NewChat;NewCode;
+
+[Desktop Action NewChat]
+Name=New Chat
+Exec=claude-desktop --password-store=gnome-libsecret --ozone-platform=wayland --ozone-platform-hint=wayland --enable-features=UseOzonePlatform,WaylandWindowDecorations "claude://claude.ai/new?surface=chat&source=desktop_action"
+
+[Desktop Action NewCode]
+Name=New Claude Code Session
+Exec=claude-desktop --password-store=gnome-libsecret --ozone-platform=wayland --ozone-platform-hint=wayland --enable-features=UseOzonePlatform,WaylandWindowDecorations "claude://code/new?source=desktop_action"
