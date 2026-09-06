@@ -56,6 +56,44 @@ Size in the guest belongs to `rdp_desktopScaleFactor` (140 here): real Windows D
 it stays pixel-sharp, unlike stretching the remote framebuffer. Windows applies it at
 session start — a persisted session needs a logoff, not a disconnect.
 
+## Tray icon: a missing icon theme, not a Remmina bug
+
+Remmina's tray applet (`remmina -i`) is the only tray item here that publishes an
+*IconName* (`org.remmina.Remmina-status`) instead of a raw pixmap, so it is the first
+thing to break when the icon theme cannot be resolved. Everything else in the tray kept
+working, which made it look Remmina-specific:
+
+```
+omarchy-shell: WARN: Could not load icon "org.remmina.Remmina-status" ... from request
+```
+
+The theme in use pointed at `Yaru-gray`, which `yaru-icon-theme` does not ship — the
+name comes from Omarchy's `vantablack` theme (`white` has the same defect spelled
+`Yaru-grey`) and travels into any theme copied from it. `omarchy-theme-set-gnome` only
+falls back when the `icons.theme` file is *missing*; it never checks that the name
+resolves. Upstream: [omacom/omarchy#7203](https://github.com/omacom/omarchy/issues/7203).
+
+Name the real theme in the theme that is actually in use:
+
+```bash
+echo Yaru-dark > ~/.config/omarchy/themes/neutral-dark/icons.theme
+gsettings set org.gnome.desktop.interface icon-theme Yaru-dark
+```
+
+and alias the broken name once, so Omarchy's own themes stop mattering:
+
+```bash
+ln -sfn /usr/share/icons/Yaru-dark ~/.local/share/icons/Yaru-gray
+```
+
+`~/.local/share/icons` precedes `/usr/share/icons` in the XDG search path, so this covers
+`vantablack` without touching the `omarchy-dev` package, which would overwrite an edit on
+the next update. `Yaru-dark` ships `22x22/panel/org.remmina.Remmina-status.svg` as a white
+glyph, which is what the dark bar wants.
+
+Restoring app-brand colours is not the monochrome look Vantablack intends — that half of
+the upstream issue is a design decision, not something to fix here.
+
 ## Files
 
 - `org.remmina.Remmina.desktop` → `~/.local/share/applications/` — pins the launch
