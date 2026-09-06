@@ -11,8 +11,7 @@ o.window({ tag = "default-opacity" }, { opacity = "1 0.96" })
 local chat_apps = {
   [[^(discord|vesktop|webcord)$]],
   [[^(org\.telegram\.desktop|telegram-desktop|TelegramDesktop)$]],
-  [[^(com\.ktechpit\.whatsie)$]],
-  [[^(WhatsApp Desktop)$]],
+  [[^(com\.rtosta\.zapzap)$]],
   [[^(Viber|viber)$]],
 }
 
