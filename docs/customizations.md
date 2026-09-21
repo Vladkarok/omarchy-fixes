@@ -328,6 +328,10 @@ they are — recheck after an upgrade. Details and the measurements in
   fact — stock fcitx5 broke Ctrl+C/Ctrl+V on the UA layout system-wide. **If v4
   reinstalls fcitx5, expect that regression to return.**
 - **`foot/foot.ini`** absent — unused terminal, no action needed.
+- **`pacman/makepkg.conf`** → `~/.config/pacman/makepkg.conf`: `MAKEFLAGS=-j$(nproc)`
+  (stock builds single-threaded — icu76 took 4 min), `!debug` (no `-debug` packages
+  that the orphan sweep deletes right after), `!check` (mdcat's tests recompile the
+  whole crate tree a second time).
 
 ---
 
