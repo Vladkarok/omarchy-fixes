@@ -30,6 +30,40 @@ local function rebind(keys, description, dispatcher, options)
   o.bind(keys, description, dispatcher, options)
 end
 
+-- Universal clipboard by keycode. Omarchy's version sends key names ("V"),
+-- which Hyprland resolves only in the active layout group, so under the
+-- Ukrainian layout SUPER + V fails with "send_key_state: key not found".
+-- xkb keycodes are layout-independent: A=38, X=53, C=54, V=55.
+local function send_code_once(mods, code)
+  local key = "code:" .. code
+  hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = key, state = "down" }))
+  hl.timer(function()
+    hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = key, state = "up" }))
+  end, { timeout = 50, type = "oneshot" })
+end
+
+local function active_window_is_terminal()
+  local window = hl.get_active_window()
+  for _, tag in ipairs(window and window.tags or {}) do
+    if tag:gsub("%*$", "") == "terminal" then
+      return true
+    end
+  end
+  return false
+end
+
+-- Terminals take CTRL + SHIFT for copy/paste.
+local function clipboard_shortcut(code, shift_in_terminal)
+  return function()
+    send_code_once((shift_in_terminal and active_window_is_terminal()) and "CTRL SHIFT" or "CTRL", code)
+  end
+end
+
+rebind("SUPER + A", "Select all", clipboard_shortcut(38))
+rebind("SUPER + C", "Universal copy", clipboard_shortcut(54, true))
+rebind("SUPER + V", "Universal paste", clipboard_shortcut(55, true))
+rebind("SUPER + X", "Universal cut", clipboard_shortcut(53))
+
 -- Launch Last War through its desktop entry.
 rebind("SUPER + SHIFT + L", "Last War", { launch = "gtk-launch LastWar" })
 
