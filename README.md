@@ -414,6 +414,11 @@ Included files:
 - `omarchy/bin/omarchy-agent-usage-grok`: Grok collector for the `omarchy.agents` bar panel
 - `omarchy/systemd/omarchy-agent-usage-grok.service`: writes the Grok usage record
 - `omarchy/systemd/omarchy-agent-usage-grok.timer`: refreshes that record every 15 minutes
+- `omarchy/bin/omarchy-agent-usage-zai`: Z.ai (GLM Coding Plan) collector for the `omarchy.agents` bar panel
+- `omarchy/bin/omarchy-zai-account`: manage several Z.ai accounts without re-login (feeds the collector)
+- `omarchy/systemd/omarchy-agent-usage-zai.service`: writes the Z.ai usage record
+- `omarchy/systemd/omarchy-agent-usage-zai.timer`: refreshes that record every 15 minutes
+- `mise/global-config.toml` (mirror of `~/.config/mise/config.toml`; not named `config.toml` so mise does not read it as a project config): mise-managed CLIs; herdr lives here instead of the lagging `[omarchy]` package
 - `omarchy/bin/omarchy-desktop-apps-update`: offers (and on click installs) Claude Desktop, the Codex app and ZCode straight from their vendors' feeds
 - `omarchy/systemd/omarchy-desktop-apps-update.service` + `.timer`: checks for new releases every 15 minutes
 - `omarchy/patches/omarchy-menu-power-profile.patch`
@@ -494,6 +499,111 @@ Notes:
   `omarchy-agent-usage-grok` will overwrite the same `grok.json`, so remove the
   timer and the `~/.local/bin` copy to avoid two writers.
 
+### GLM (Z.ai) in the Agents Panel
+
+Same story as Grok: the agents panel has no Z.ai collector upstream, and
+[PR 7566](https://github.com/omacom/omarchy/pull/7566) ("Add Z.ai GLM Coding
+Plan agent usage collector") was still open as of 2026-09-06.
+`omarchy/bin/omarchy-agent-usage-zai` is that PR's collector, extended for
+this machine, where GLM is consumed through ZCode rather than pi or omp:
+
+- **Limits** — unchanged from the PR. The coding-plan monitor endpoint
+  `api.z.ai/api/monitor/usage/quota/limit` reports the rolling 5-hour
+  session window and the weekly pool plus the plan tier, and only answers
+  for keys that carry a Coding Plan.
+- **Credentials** — the PR reads `~/.config/omarchy/agents/zai.json`,
+  `ZAI_API_KEY`/`ZHIPU_API_KEY`, and pi/omp `.env` files. The collector adds
+  one more source at the end of that chain: ZCode stores the plan-scoped API
+  key it derives at OAuth login in `~/.zcode/v2/config.json`, under the
+  enabled `builtin:zai-coding-plan` provider. That is what makes the tab
+  work here with no extra setup; re-login in ZCode refreshes the key.
+- **Local stats** — the PR scans pi/omp session files, which do not exist
+  here. The collector additionally reads ZCode's `model_usage` table in
+  `~/.zcode/cli/db/db.sqlite` (one row per billed model request, z.ai
+  provider ids only): tokens by day and model from every row, prompts from
+  distinct `main_turn` turns. The pi/omp scan still runs and both sources
+  are merged.
+- **Second accounts** — `omarchy-agent-usage-zai --account <label>` builds a
+  record for an account saved with `omarchy-zai-account` (next section):
+  limits from that account's own key, tokens from the provider slot its key
+  is attached to, pi/omp rows skipped (they cannot be split by account).
+
+`omarchy-agent-usage-update` only globs the package-owned `$OMARCHY_PATH/bin`,
+so — same as Grok — a systemd user timer writes the record straight into the
+directory the panel watches.
+
+#### Install
+
+```bash
+install -Dm755 omarchy/bin/omarchy-agent-usage-zai ~/.local/bin/omarchy-agent-usage-zai
+install -Dm644 omarchy/systemd/omarchy-agent-usage-zai.service ~/.config/systemd/user/omarchy-agent-usage-zai.service
+install -Dm644 omarchy/systemd/omarchy-agent-usage-zai.timer ~/.config/systemd/user/omarchy-agent-usage-zai.timer
+systemctl --user daemon-reload && systemctl --user enable --now omarchy-agent-usage-zai.timer
+```
+
+Notes:
+
+- On a machine without ZCode, the collector behaves exactly like the upstream
+  PR: limits need a plan key via config file, env, or pi/omp, and local stats
+  come from pi/omp sessions only.
+- The ZCode database only keeps recent usage, so the all-time totals cover
+  that window rather than the account's lifetime; the weekly meters come
+  from Z.ai and are unaffected.
+- The Z.ai mark (`assets/zai.svg`) ships in the upstream PR but not in the
+  installed plugin under `/usr/share/omarchy`, so the tab falls back to the
+  generic bar glyph, like Grok.
+- Retire all of this once PR 7566 merges: remove the timer and the
+  `~/.local/bin` copy so only the packaged collector writes `zai.json`.
+
+#### Two Z.ai accounts without re-login
+
+A second GLM Coding Plan subscription normally means logging out and back
+in: ZCode stores one plan key per provider, and its OAuth login replaces
+that key. It does not have to. Every Z.ai account can mint a plain API key
+in the console, and that key carries the Coding Plan of the account that
+created it — Z.ai routes it through the same
+`api.z.ai/api/anthropic` endpoint the OAuth-derived key uses
+([docs.z.ai](https://docs.z.ai/devpack/tool/claude)). ZCode's `builtin:zai`
+provider ("Z.AI - API Key") is an idle slot pointing at exactly that
+endpoint with the full GLM model list, so the second account lives there.
+
+`omarchy/bin/omarchy-zai-account` is the glue:
+
+```bash
+omarchy-zai-account add second      # paste the second account's console key (hidden prompt)
+omarchy-zai-account attach second   # writes the key into builtin:zai
+```
+
+`attach` also generates and enables a `omarchy-agent-usage-zai-second`
+service + timer pair, which writes `zai-second.json` into the agents-panel
+directory — a second tab with that account's own 5-hour/weekly meters and
+its own token spend. Once the key is attached and its models are in use,
+ZCode records those requests under `builtin:zai`, which is what the account
+record's local stats read. Switching accounts is picking a model from the
+other provider in the model picker; nothing ever logs out.
+
+The rest of the subcommands:
+
+| Command | Does |
+|---|---|
+| `list` | every key this machine can reach and where it lives |
+| `label <name>` | name the key ZCode is currently logged in with (renames the primary tab to "Z.ai (name)") |
+| `status` | probe every key's plan windows side by side |
+| `detach` | clear the `builtin:zai` slot; the account and its panel record stay |
+| `sync` | re-apply the attached key if ZCode wrote its config back over it |
+| `remove <label>` | forget an account, disable its timer, drop its record |
+
+State (labels + keys, mode 0600) lives in
+`~/.config/omarchy/agents/zai.json` — the same file the collector's
+config-file source reads, so a bare `apiKey` there still works exactly as
+the upstream PR documents. The units are generated per label at `attach`
+time, not shipped in this repo, because the label is baked into their file
+names and ExecStart lines.
+
+One caveat: ZCode holds `~/.zcode/v2/config.json` in memory while running
+and may write it back over an attached key. Quit ZCode before `attach`, or
+run `omarchy-zai-account sync` afterwards — that is what it is for.
+
 ### Desktop Agent Apps Straight from Their Vendors
 
 The Electron desktop apps for coding agents ship Linux builds only as `.deb`
@@ -520,6 +630,14 @@ visible. `--install <pkg>` does the same without asking. The script skips apps
 that are not installed, and takes package names as arguments to check a
 subset. The `[omarchy]` package never wins back: pacman does not downgrade,
 and the repo is always behind.
+
+herdr is not an Electron app but a single static binary on GitHub releases,
+and the `[omarchy]` package for it sat on 0.9.1 two days after 0.9.3 shipped.
+mise already knows it (`aqua:herdrdev/herdr`), so `mise/global-config.toml` (mirror of `~/.config/mise/config.toml`; not named `config.toml` so mise does not read it as a project config) pins
+`herdr = "latest"` and `omarchy update` keeps it current through
+`omarchy-update-mise`; the pacman package is removed so the mise shim is the
+only `herdr` on PATH. The Omarchy integration (bash function, keybinding)
+needs only the name on PATH.
 
 Z.ai also publishes an official `.pkg.tar.zst` next to the `.deb`; installed
 from that, ZCode's own updater would run `pacman -U` itself. The timer makes

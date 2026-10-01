@@ -1,0 +1,14 @@
+[settings]
+minimum_release_age_excludes = ["claude", "codex"]
+
+[settings.upgrade]
+auto_prune = false
+
+[tools]
+claude = { version = "latest", minimum_release_age = "0s", prerelease = "true" }
+codex = { version = "latest", minimum_release_age = "0s" }
+crush = "latest"
+gh = "latest"
+herdr = "latest"
+"npm:@xai-official/grok" = "latest"
+opencode = "latest"
