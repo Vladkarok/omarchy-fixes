@@ -1,0 +1,7 @@
+[Unit]
+Description=Install the latest Claude Desktop, Codex app and ZCode from their vendors' feeds via the AUR PKGBUILDs
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/omarchy-desktop-apps-update

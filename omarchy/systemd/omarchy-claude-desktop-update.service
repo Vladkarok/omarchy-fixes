@@ -1,7 +1,0 @@
-[Unit]
-Description=Install the latest Claude Desktop from Anthropic's apt index via the AUR PKGBUILD
-After=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=%h/.local/bin/omarchy-claude-desktop-update
