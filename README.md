@@ -419,8 +419,6 @@ Included files:
 - `omarchy/systemd/omarchy-agent-usage-zai.service`: writes the Z.ai usage record
 - `omarchy/systemd/omarchy-agent-usage-zai.timer`: refreshes that record every 15 minutes
 - `mise/global-config.toml` (mirror of `~/.config/mise/config.toml`; not named `config.toml` so mise does not read it as a project config): mise-managed CLIs; herdr lives here instead of the lagging `[omarchy]` package
-- `omarchy/bin/omarchy-desktop-apps-update`: offers (and on click installs) Claude Desktop, the Codex app and ZCode straight from their vendors' feeds
-- `omarchy/systemd/omarchy-desktop-apps-update.service` + `.timer`: checks for new releases every 15 minutes
 - `omarchy/patches/omarchy-menu-power-profile.patch`
 - `tensaku/config.toml`: closes the screenshot editor after copy/save/save-as
 
@@ -604,32 +602,22 @@ One caveat: ZCode holds `~/.zcode/v2/config.json` in memory while running
 and may write it back over an attached key. Quit ZCode before `attach`, or
 run `omarchy-zai-account sync` afterwards — that is what it is for.
 
-### Desktop Agent Apps Straight from Their Vendors
+### AI Desktop Apps Fresh from the Vendor
 
 The Electron desktop apps for coding agents ship Linux builds only as `.deb`
-and leave updating to the distro, which on Arch means waiting for a
-repackager:
+and leave updating to the distro. `[omarchy]` repackages them, but its
+`sync-upstream` parks every bump in one batched PR that waits for a
+maintainer, so claude-desktop and openai-codex-desktop sit days behind the
+vendor while a new model needs the new build. Two fixes:
 
-| App | Vendor feed | Self-updates on Linux? | Repackager lag |
-|---|---|---|---|
-| Claude Desktop (`claude-desktop`) | Anthropic apt index | no | `[omarchy]` +2.5 days / still missing after 3; AUR ~2 h |
-| Codex / ChatGPT app (`chatgpt-desktop`) | OpenAI apt index | no ("Linux updates are managed by the package manager") | AUR ~12 h, and one release behind |
-| ZCode (`z-code-bin`) | `zcode.z.ai/api/v1/releases/electron/manifest` | has electron-updater, but the AUR build is a repacked `.deb`, so it is wired to `dpkg` and inert on Arch | AUR ~14 h |
-
-On top of that, yay never checks AUR for a package that also exists in a sync
-repo, so an AUR `claude-desktop` stays frozen after the first `yay -Syu`.
-
-`omarchy/bin/omarchy-desktop-apps-update` asks each vendor's own feed for the
-newest version (the ZCode endpoint is the one the app's updater calls, with
-`channel=1` for stable), and when it is ahead of the installed package, shows
-a notification with an **Update** button. Nothing is installed until that is
-pressed; the decision stays with the user. On click, a floating Omarchy
-terminal re-targets the AUR PKGBUILD (the same vendor `.deb` plus a launcher)
-at that version, builds it and installs it with `pacman -U`, so the build is
-visible. `--install <pkg>` does the same without asking. The script skips apps
-that are not installed, and takes package names as arguments to check a
-subset. The `[omarchy]` package never wins back: pacman does not downgrade,
-and the repo is always behind.
+- upstream: [omarchy-pkgs#755](https://github.com/omacom/omarchy-pkgs/pull/755)
+  puts the vendor-fed apps on the repo's unattended `auto_merge` lane with a
+  6 h `min_release_age` quarantine;
+- locally: the `io.github.vladkarok.agent-apps` shell plugin
+  (`~/Projects/omarchy-agent-apps`) lists every installed AI app against its
+  vendor version and, on click, builds Omarchy's own recipe at that version
+  from a local omarchy-pkgs clone. It replaced an earlier
+  `omarchy-desktop-apps-update` timer that rebuilt AUR packages.
 
 herdr is not an Electron app but a single static binary on GitHub releases,
 and the `[omarchy]` package for it sat on 0.9.1 two days after 0.9.3 shipped.
@@ -638,18 +626,6 @@ mise already knows it (`aqua:herdrdev/herdr`), so `mise/global-config.toml` (mir
 `omarchy-update-mise`; the pacman package is removed so the mise shim is the
 only `herdr` on PATH. The Omarchy integration (bash function, keybinding)
 needs only the name on PATH.
-
-Z.ai also publishes an official `.pkg.tar.zst` next to the `.deb`; installed
-from that, ZCode's own updater would run `pacman -U` itself. The timer makes
-that unnecessary and keeps all three apps on one mechanism.
-
-```bash
-install -Dm755 omarchy/bin/omarchy-desktop-apps-update ~/.local/bin/omarchy-desktop-apps-update
-install -Dm644 omarchy/systemd/omarchy-desktop-apps-update.service ~/.config/systemd/user/omarchy-desktop-apps-update.service
-install -Dm644 omarchy/systemd/omarchy-desktop-apps-update.timer ~/.config/systemd/user/omarchy-desktop-apps-update.timer
-systemctl --user daemon-reload
-systemctl --user enable --now omarchy-desktop-apps-update.timer
-```
 
 ### Screenshot Annotation: Satty → Tensaku
 

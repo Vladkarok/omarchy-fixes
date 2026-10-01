@@ -1,9 +1,0 @@
-[Unit]
-Description=Offer updates for Claude Desktop, the Codex app and ZCode from their vendors' feeds
-After=network-online.target
-
-[Service]
-Type=oneshot
-# The check blocks on the notification until it is clicked or dismissed.
-TimeoutStartSec=infinity
-ExecStart=%h/.local/bin/omarchy-desktop-apps-update
