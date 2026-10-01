@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for a new Claude Desktop release every 15 minutes
+
+[Timer]
+OnStartupSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

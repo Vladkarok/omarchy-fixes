@@ -414,6 +414,8 @@ Included files:
 - `omarchy/bin/omarchy-agent-usage-grok`: Grok collector for the `omarchy.agents` bar panel
 - `omarchy/systemd/omarchy-agent-usage-grok.service`: writes the Grok usage record
 - `omarchy/systemd/omarchy-agent-usage-grok.timer`: refreshes that record every 15 minutes
+- `omarchy/bin/omarchy-claude-desktop-update`: installs Claude Desktop straight from Anthropic's apt index
+- `omarchy/systemd/omarchy-claude-desktop-update.service` + `.timer`: checks for a new release every 15 minutes
 - `omarchy/patches/omarchy-menu-power-profile.patch`
 - `tensaku/config.toml`: closes the screenshot editor after copy/save/save-as
 
@@ -491,6 +493,29 @@ Notes:
 - Retire all of this once a Grok collector merges upstream: the packaged
   `omarchy-agent-usage-grok` will overwrite the same `grok.json`, so remove the
   timer and the `~/.local/bin` copy to avoid two writers.
+
+### Claude Desktop Straight from Anthropic
+
+Anthropic ships the Linux Claude Desktop (the app that hosts Claude Code)
+only as a `.deb` in its apt repo, and the Linux build has no self-updater.
+Omarchy repackages it into `[omarchy]` days later (2.7032.0: +2.5 days;
+2.9939.4: still missing after 3), AUR `claude-desktop` follows within hours,
+and yay never checks AUR for a package that also exists in a sync repo, so
+even an AUR install stays frozen after the first `yay -Syu`.
+
+`omarchy/bin/omarchy-claude-desktop-update` reads the apt `Packages` index,
+and when it is ahead of the installed version, re-targets the AUR PKGBUILD
+(the same `.deb` plus a Wayland launcher) at that version, builds it, installs
+it with `pacman -U`, and sends a notification. The `[omarchy]` package never
+wins back: pacman does not downgrade, and the repo is always behind.
+
+```bash
+install -Dm755 omarchy/bin/omarchy-claude-desktop-update ~/.local/bin/omarchy-claude-desktop-update
+install -Dm644 omarchy/systemd/omarchy-claude-desktop-update.service ~/.config/systemd/user/omarchy-claude-desktop-update.service
+install -Dm644 omarchy/systemd/omarchy-claude-desktop-update.timer ~/.config/systemd/user/omarchy-claude-desktop-update.timer
+systemctl --user daemon-reload
+systemctl --user enable --now omarchy-claude-desktop-update.timer
+```
 
 ### Screenshot Annotation: Satty → Tensaku
 
