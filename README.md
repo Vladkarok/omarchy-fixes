@@ -414,7 +414,7 @@ Included files:
 - `omarchy/bin/omarchy-agent-usage-grok`: Grok collector for the `omarchy.agents` bar panel
 - `omarchy/systemd/omarchy-agent-usage-grok.service`: writes the Grok usage record
 - `omarchy/systemd/omarchy-agent-usage-grok.timer`: refreshes that record every 15 minutes
-- `omarchy/bin/omarchy-desktop-apps-update`: installs Claude Desktop, the Codex app and ZCode straight from their vendors' feeds
+- `omarchy/bin/omarchy-desktop-apps-update`: offers (and on click installs) Claude Desktop, the Codex app and ZCode straight from their vendors' feeds
 - `omarchy/systemd/omarchy-desktop-apps-update.service` + `.timer`: checks for new releases every 15 minutes
 - `omarchy/patches/omarchy-menu-power-profile.patch`
 - `tensaku/config.toml`: closes the screenshot editor after copy/save/save-as
@@ -511,12 +511,15 @@ repo, so an AUR `claude-desktop` stays frozen after the first `yay -Syu`.
 
 `omarchy/bin/omarchy-desktop-apps-update` asks each vendor's own feed for the
 newest version (the ZCode endpoint is the one the app's updater calls, with
-`channel=1` for stable), and when it is ahead of the installed package,
-re-targets the AUR PKGBUILD (the same vendor `.deb` plus a launcher) at that
-version, builds it, installs it with `pacman -U`, and sends a notification.
-It skips apps that are not installed, and takes package names as arguments
-to run for a subset. The `[omarchy]` package never wins back: pacman does not
-downgrade, and the repo is always behind.
+`channel=1` for stable), and when it is ahead of the installed package, shows
+a notification with an **Update** button. Nothing is installed until that is
+pressed; the decision stays with the user. On click, a floating Omarchy
+terminal re-targets the AUR PKGBUILD (the same vendor `.deb` plus a launcher)
+at that version, builds it and installs it with `pacman -U`, so the build is
+visible. `--install <pkg>` does the same without asking. The script skips apps
+that are not installed, and takes package names as arguments to check a
+subset. The `[omarchy]` package never wins back: pacman does not downgrade,
+and the repo is always behind.
 
 Z.ai also publishes an official `.pkg.tar.zst` next to the `.deb`; installed
 from that, ZCode's own updater would run `pacman -U` itself. The timer makes

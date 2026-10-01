@@ -9,12 +9,19 @@
 # lags vendor releases by days, AUR by half a day to a day, and yay never
 # checks AUR for a package that also exists in a sync repo (claude-desktop).
 #
-# So: ask each vendor's own feed for the newest version, and when it is ahead
-# of what is installed, re-target the AUR PKGBUILD (same vendor .deb plus a
-# launcher) at that version, build it and install it.
+# Default mode (what the timer runs): ask each vendor's own feed for the
+# newest version, and when it is ahead of what is installed, show a
+# notification with an "Update" button. Nothing is installed unless the
+# button is pressed; then a floating Omarchy terminal re-targets the AUR
+# PKGBUILD (same vendor .deb plus a launcher) at that version, builds it and
+# installs it.
+#
+#   omarchy-desktop-apps-update                  check all, offer updates
+#   omarchy-desktop-apps-update --install <pkg>  build and install right away
 set -euo pipefail
 
 work=${XDG_CACHE_HOME:-$HOME/.cache}/desktop-apps-update
+all=(claude-desktop chatgpt-desktop z-code-bin)
 
 apt_latest() { curl -fsSL --max-time 30 "$1" | sed -n 's/^Version: //p' | sort -V | tail -1; }
 
@@ -30,38 +37,56 @@ latest_z_code_bin() {
     | sed -n 's/^version: *//p'
 }
 
-update() {
+installed_version() { pacman -Q "$1" 2>/dev/null | awk '{print $2}' | cut -d- -f1 || true; }
+
+install_latest() {
   local pkg=$1 latest installed dir
   latest=$("latest_${pkg//-/_}")
   [[ -n $latest ]] || { echo "$pkg: no version from vendor feed" >&2; return 1; }
-  installed=$(pacman -Q "$pkg" 2>/dev/null | awk '{print $2}' | cut -d- -f1 || true)
-  if [[ -n $installed && $(vercmp "$latest" "$installed") -le 0 ]]; then
-    echo "$pkg $installed is current"
-    return 0
-  fi
+  installed=$(installed_version "$pkg")
+  echo "$pkg ${installed:-none} -> $latest"
 
-  echo "$pkg $installed -> $latest"
   dir=$work/$pkg
   if [[ -d $dir/.git ]]; then
     git -C "$dir" fetch -q && git -C "$dir" reset -q --hard origin/HEAD
   else
     git clone -q "https://aur.archlinux.org/$pkg.git" "$dir"
   fi
-  (
-    cd "$dir"
-    sed -i "s/^pkgver=.*/pkgver=$latest/; s/^pkgrel=.*/pkgrel=1/" PKGBUILD
-    updpkgsums
-    makepkg -sfC --noconfirm
-    sudo pacman -U --noconfirm "$pkg-$latest-1-"*.pkg.tar.zst
-  )
-  notify-send "$pkg updated" "$installed → $latest. Restart the app to use it."
+  cd "$dir"
+  sed -i "s/^pkgver=.*/pkgver=$latest/; s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+  updpkgsums
+  makepkg -sfC --noconfirm
+  sudo pacman -U --noconfirm "$pkg-$latest-1-"*.pkg.tar.zst
+  echo "Restart $pkg to use $latest."
 }
 
-pkgs=("$@")
-[[ $# -gt 0 ]] || pkgs=(claude-desktop chatgpt-desktop z-code-bin)
+offer_update() {
+  local pkg=$1 latest installed choice
+  latest=$("latest_${pkg//-/_}")
+  [[ -n $latest ]] || { echo "$pkg: no version from vendor feed" >&2; return 1; }
+  installed=$(installed_version "$pkg")
+  if [[ $(vercmp "$latest" "$installed") -le 0 ]]; then
+    echo "$pkg $installed is current"
+    return 0
+  fi
+  echo "$pkg $installed -> $latest available"
+  # -t 0 keeps the notification until acted on; notify-send prints the chosen
+  # action id and exits when the notification is clicked or dismissed.
+  choice=$(notify-send -a "Desktop apps" -t 0 -A "update=Update" \
+    "$pkg $latest available" "Installed: $installed. Build and install from the vendor .deb?" || true)
+  [[ $choice == update ]] || return 0
+  omarchy-launch-floating-terminal-with-presentation "$0" --install "$pkg"
+}
+
+if [[ ${1:-} == --install ]]; then
+  shift
+  for pkg in "$@"; do install_latest "$pkg"; done
+  exit
+fi
+
 rc=0
-for pkg in "${pkgs[@]}"; do
+for pkg in "${@:-${all[@]}}"; do
   pacman -Q "$pkg" &>/dev/null || continue
-  update "$pkg" || rc=1
+  offer_update "$pkg" || rc=1
 done
 exit $rc
