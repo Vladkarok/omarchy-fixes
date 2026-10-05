@@ -57,6 +57,12 @@ o.window({ class = [[^(steam_proton)$]], title = [[Last War]] }, { workspace = "
 -- split workspace 5 with the game.
 o.window({ class = [[^(steam_proton)$]], title = [[^(Launcher - Iced)$]] }, { workspace = "5 silent", float = true })
 
+-- Hyprland stops sending frame callbacks to windows on hidden workspaces, so a
+-- Proton game blocks in vkQueuePresent and its loading stalls (and comes up
+-- broken) unless workspace 5 stays on screen. Keep them ticking at
+-- misc:render_unfocused_fps (15) while hidden.
+o.window({ class = [[^(steam_proton|steam_app_.*)$]] }, { render_unfocused = true })
+
 o.window({ class = [[^(xclicker)$]] }, { workspace = "15 silent" })
 o.window({ class = [[^(steam_proton)$]], title = [[^$]] }, { workspace = "15 silent" })
 
