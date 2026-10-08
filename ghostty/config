@@ -24,6 +24,9 @@ keybind = control+insert=copy_to_clipboard
 # Stock ctrl+shift+c/v match the typed letter, which is Cyrillic in the UA layout; physical keys match in any layout.
 keybind = ctrl+shift+key_c=copy_to_clipboard:mixed
 keybind = ctrl+shift+key_v=paste_from_clipboard
+# Kitty-protocol TUIs (Codex, neovim) read only the UA codepoint of Ctrl+С/Ctrl+М; send the C0 bytes so interrupt and paste still work.
+keybind = ctrl+с=text:\x03
+keybind = ctrl+м=text:\x16
 # Send Shift+Enter as CSI-u so TUIs can distinguish it from Enter.
 keybind = shift+enter=csi:13;2u
 # Legacy encoding sends Alt+Shift+Enter the same as Alt+Enter; send CSI-u so tmux can match M-S-Enter.
