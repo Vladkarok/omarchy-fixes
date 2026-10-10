@@ -83,3 +83,12 @@ hl.config({
 --     column_width = 0.97,
 --   },
 -- })
+
+-- Keep the pointer visible. Omarchy hides it on any key press (compositor
+-- binds included) and over Remmina's XWayland window mouse motion does not
+-- bring it back, so its OK/Cancel panels had an invisible cursor.
+hl.config({
+  cursor = {
+    hide_on_key_press = false,
+  },
+})
