@@ -27,7 +27,13 @@ Only one bind per key fires inside a submap. Adding a second one (a `notify-send
 on the same key shadows the `submap, reset` and strands you in passthrough with every
 hotkey dead.
 
-## Sharpness: run it on XWayland, not Wayland
+## Sharpness: native Wayland with a local patch (since 2026-10-12)
+
+The panel now runs at integer scale 2, and Remmina runs on native Wayland from a locally patched package (`PKGBUILD` + `remmina-hidpi-dynres.patch` here, built as `1:1.4.43-3.1`). Stock Remmina's dynamic resolution asks the server for the logical window size, so GTK doubles it: clean but huge. The patch requests logical size × GTK scale factor and draws it back at 1/factor, an exact pixel copy, and hands the remote pointer to GDK at the same scale. It fills the window at any size and in fullscreen. X11 is no longer needed, which also avoids Hyprland 0.56.2 never unhiding the cursor over XWayland windows.
+
+Rebuild after every Remmina update: `cd remmina && makepkg -df` (the `-d` skips the unneeded gobject-introspection makedepend), then `pacman -U` the result.
+
+## Old: run it on XWayland, not Wayland (scale 1.6 era)
 
 Counterintuitive on this setup, but measured: XWayland is ~9x sharper.
 

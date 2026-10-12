@@ -4,7 +4,7 @@ Name=Remmina
 GenericName=Remote Desktop Client
 Comment=Connect to remote desktops
 TryExec=remmina-file-wrapper
-Exec=env GDK_BACKEND=x11 GDK_SCALE=1 GDK_DPI_SCALE=1 GTK_THEME=Adwaita-dark remmina-file-wrapper %U
+Exec=env GDK_BACKEND=wayland GTK_THEME=Adwaita-dark remmina-file-wrapper %U
 Icon=org.remmina.Remmina
 Terminal=false
 Type=Application
@@ -16,15 +16,15 @@ Actions=Kiosk;Profile;Tray;Quit;
 
 [Desktop Action Profile]
 Name=Create a New Connection Profile
-Exec=env GDK_BACKEND=x11 GDK_SCALE=1 GDK_DPI_SCALE=1 GTK_THEME=Adwaita-dark /usr/bin/remmina --new
+Exec=env GDK_BACKEND=wayland GTK_THEME=Adwaita-dark /usr/bin/remmina --new
 
 [Desktop Action Kiosk]
 Name=Start Remmina in Kiosk mode
-Exec=env GDK_BACKEND=x11 GDK_SCALE=1 GDK_DPI_SCALE=1 GTK_THEME=Adwaita-dark /usr/bin/remmina --kiosk
+Exec=env GDK_BACKEND=wayland GTK_THEME=Adwaita-dark /usr/bin/remmina --kiosk
 
 [Desktop Action Tray]
 Name=Start Remmina Minimized
-Exec=env GDK_BACKEND=x11 GDK_SCALE=1 GDK_DPI_SCALE=1 GTK_THEME=Adwaita-dark /usr/bin/remmina --icon
+Exec=env GDK_BACKEND=wayland GTK_THEME=Adwaita-dark /usr/bin/remmina --icon
 
 [Desktop Action Quit]
 Name=Quit

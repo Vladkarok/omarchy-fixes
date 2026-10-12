@@ -1,0 +1,137 @@
+diff -ru /tmp/claude-1000/-home-vladkarok-Work-omarchy-fixes/251c9174-d183-43e0-9a9c-c8f7fb60630a/scratchpad/rdp.orig/rdp_event.c plugins/rdp/rdp_event.c
+--- a/plugins/rdp/rdp_event.c	2026-10-10 22:56:48.281156908 +0200
++++ b/plugins/rdp/rdp_event.c	2026-10-10 22:56:48.296764095 +0200
+@@ -234,6 +234,24 @@
+ }
+ 
+ 
++/*
++ * Dynamic resolution on a HiDPI Wayland output: GTK renders the drawing area at
++ * an integer scale factor (2 on a 2x output), so a remote desktop sized to the
++ * logical allocation is upscaled by GTK and goes blurry. Instead ask the server
++ * for allocation * factor pixels and draw them back at 1 / factor, which is an
++ * exact pixel copy. On X11 or a 1x output the factor is 1 and nothing changes.
++ */
++static gboolean remmina_rdp_event_dynres_hidpi(rfContext *rfi)
++{
++	return rfi->scale == REMMINA_PROTOCOL_WIDGET_SCALE_MODE_DYNRES && rfi->hidpi_factor > 1;
++}
++
++/* Whether the remote framebuffer is drawn through cairo_scale(): scaled mode or HiDPI dynamic resolution */
++static gboolean remmina_rdp_event_is_scaled(rfContext *rfi)
++{
++	return rfi->scale == REMMINA_PROTOCOL_WIDGET_SCALE_MODE_SCALED || remmina_rdp_event_dynres_hidpi(rfi);
++}
++
+ static void remmina_rdp_event_scale_area(RemminaProtocolWidget *gp, gint *x, gint *y, gint *w, gint *h)
+ {
+ 	TRACE_CALL(__func__);
+@@ -291,7 +309,7 @@
+ 		w = ui->reg.ureg[i].w;
+ 		h = ui->reg.ureg[i].h;
+ 
+-		if (rfi->scale == REMMINA_PROTOCOL_WIDGET_SCALE_MODE_SCALED)
++		if (remmina_rdp_event_is_scaled(rfi))
+ 			remmina_rdp_event_scale_area(gp, &x, &y, &w, &h);
+ 
+ 		gtk_widget_queue_draw_area(rfi->drawing_area, x, y, w, h);
+@@ -321,8 +339,9 @@
+ 	gtk_widget_get_allocation(GTK_WIDGET(gp), &a);
+ 	gpwidth = a.width;
+ 	gpheight = a.height;
++	rfi->hidpi_factor = MAX(1, gtk_widget_get_scale_factor(GTK_WIDGET(gp)));
+ 
+-	if (rfi->scale == REMMINA_PROTOCOL_WIDGET_SCALE_MODE_SCALED) {
++	if (remmina_rdp_event_is_scaled(rfi)) {
+ 		if ((gpwidth > 1) && (gpheight > 1)) {
+ 			rdwidth = remmina_plugin_service->protocol_plugin_get_width(gp);
+ 			rdheight = remmina_plugin_service->protocol_plugin_get_height(gp);
+@@ -376,7 +395,7 @@
+ 		if (!rfi->surface)
+ 			return FALSE;
+ 
+-		if (rfi->scale == REMMINA_PROTOCOL_WIDGET_SCALE_MODE_SCALED)
++		if (remmina_rdp_event_is_scaled(rfi))
+ 			cairo_scale(context, rfi->scale_x, rfi->scale_y);
+ 
+ 		cairo_surface_flush(rfi->surface);
+@@ -424,6 +443,10 @@
+ 		gtk_widget_get_allocation(GTK_WIDGET(gp), &a);
+ 		gpwidth = a.width;
+ 		gpheight = a.height;
++		if (remmina_rdp_event_dynres_hidpi(rfi)) {
++			gpwidth *= rfi->hidpi_factor;
++			gpheight *= rfi->hidpi_factor;
++		}
+ 		prevwidth = remmina_plugin_service->protocol_plugin_get_width(gp);
+ 		prevheight = remmina_plugin_service->protocol_plugin_get_height(gp);
+ 
+@@ -528,7 +551,7 @@
+ 	if (!rfi || !rfi->connected || rfi->is_reconnecting)
+ 		return;
+ 
+-	if ((rfi->scale == REMMINA_PROTOCOL_WIDGET_SCALE_MODE_SCALED) && (rfi->scale_width >= 1) && (rfi->scale_height >= 1)) {
++	if (remmina_rdp_event_is_scaled(rfi) && (rfi->scale_width >= 1) && (rfi->scale_height >= 1)) {
+ 		*ox = (UINT16)(ix * remmina_plugin_service->protocol_plugin_get_width(gp) / rfi->scale_width);
+ 		*oy = (UINT16)(iy * remmina_plugin_service->protocol_plugin_get_height(gp) / rfi->scale_height);
+ 	} else {
+@@ -550,7 +573,7 @@
+ 	if (!rfi || !rfi->connected || rfi->is_reconnecting)
+ 		return;
+ 
+-	if ((rfi->scale == REMMINA_PROTOCOL_WIDGET_SCALE_MODE_SCALED) && (rfi->scale_width >= 1) && (rfi->scale_height >= 1)) {
++	if (remmina_rdp_event_is_scaled(rfi) && (rfi->scale_width >= 1) && (rfi->scale_height >= 1)) {
+ 		*ox = (ix * rfi->scale_width) / remmina_plugin_service->protocol_plugin_get_width(gp);
+ 		*oy = (iy * rfi->scale_height) / remmina_plugin_service->protocol_plugin_get_height(gp);
+ 	} else {
+@@ -1294,6 +1317,15 @@
+ 
+ 	surface = cairo_image_surface_create_for_data(data, CAIRO_FORMAT_ARGB32, pointer->width, pointer->height, cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, pointer->width));
+ 	cairo_surface_flush(surface);
++	if (remmina_rdp_event_dynres_hidpi(rfi)) {
++		/* The pointer bitmap is in remote (physical) pixels: hand it over at the
++		 * display scale so GDK does not double it on screen. Hotspot is in surface pixels. */
++		cairo_surface_set_device_scale(surface, rfi->hidpi_factor, rfi->hidpi_factor);
++		((rfPointer *)ui->cursor.pointer)->cursor = gdk_cursor_new_from_surface(rfi->display, surface, pointer->xPos, pointer->yPos);
++		cairo_surface_destroy(surface);
++		free(data);
++		return TRUE;
++	}
+ 	pixbuf = gdk_pixbuf_get_from_surface(surface, 0, 0, pointer->width, pointer->height);
+ 	cairo_surface_mark_dirty(surface);
+ 	cairo_surface_destroy(surface);
+diff -ru /tmp/claude-1000/-home-vladkarok-Work-omarchy-fixes/251c9174-d183-43e0-9a9c-c8f7fb60630a/scratchpad/rdp.orig/rdp_plugin.c plugins/rdp/rdp_plugin.c
+--- a/plugins/rdp/rdp_plugin.c	2026-10-10 22:56:48.281362492 +0200
++++ b/plugins/rdp/rdp_plugin.c	2026-10-10 22:56:48.297600660 +0200
+@@ -1782,6 +1782,12 @@
+ 
+ 	gint w = remmina_plugin_service->get_profile_remote_width(gp);
+ 	gint h = remmina_plugin_service->get_profile_remote_height(gp);
++	/* HiDPI dynamic resolution: the initial window size is in logical pixels, the server gets physical ones */
++	if (rfi->scale == REMMINA_PROTOCOL_WIDGET_SCALE_MODE_DYNRES && rfi->hidpi_factor > 1 &&
++	    remmina_plugin_service->file_get_int(remminafile, "resolution_mode", RES_INVALID) == RES_USE_INITIAL_WINDOW_SIZE) {
++		w *= rfi->hidpi_factor;
++		h *= rfi->hidpi_factor;
++	}
+ 	/* multiple of 4 */
+ 	w = (w + 3) & ~0x3;
+ 	h = (h + 3) & ~0x3;
+@@ -2824,6 +2830,7 @@
+ 	gint nthname = 0;
+ 
+ 	rfi->scale = remmina_plugin_service->remmina_protocol_widget_get_current_scale_mode(gp);
++	rfi->hidpi_factor = MAX(1, gtk_widget_get_scale_factor(GTK_WIDGET(gp)));
+ 
+ 	remminafile = remmina_plugin_service->protocol_plugin_get_file(gp);
+ 
+diff -ru /tmp/claude-1000/-home-vladkarok-Work-omarchy-fixes/251c9174-d183-43e0-9a9c-c8f7fb60630a/scratchpad/rdp.orig/rdp_plugin.h plugins/rdp/rdp_plugin.h
+--- a/plugins/rdp/rdp_plugin.h	2026-10-10 22:56:48.281419279 +0200
++++ b/plugins/rdp/rdp_plugin.h	2026-10-10 22:56:48.296175230 +0200
+@@ -355,6 +355,7 @@
+ 	gint			scale_height;
+ 	gdouble			scale_x;
+ 	gdouble			scale_y;
++	gint			hidpi_factor;	/* GTK scale factor of the drawing area (2 on a 2x Wayland output, 1 on X11) */
+ 	guint			delayed_monitor_layout_handler;
+ 	gboolean		use_client_keymap;
+ 
