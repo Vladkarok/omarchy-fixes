@@ -1,6 +1,5 @@
-diff -ru /tmp/claude-1000/-home-vladkarok-Work-omarchy-fixes/251c9174-d183-43e0-9a9c-c8f7fb60630a/scratchpad/rdp.orig/rdp_event.c plugins/rdp/rdp_event.c
---- a/plugins/rdp/rdp_event.c	2026-10-10 22:56:48.281156908 +0200
-+++ b/plugins/rdp/rdp_event.c	2026-10-10 22:56:48.296764095 +0200
+--- a/plugins/rdp/rdp_event.c
++++ b/plugins/rdp/rdp_event.c
 @@ -234,6 +234,24 @@
  }
  
@@ -55,18 +54,23 @@ diff -ru /tmp/claude-1000/-home-vladkarok-Work-omarchy-fixes/251c9174-d183-43e0-
  			cairo_scale(context, rfi->scale_x, rfi->scale_y);
  
  		cairo_surface_flush(rfi->surface);
-@@ -424,6 +443,10 @@
+@@ -424,8 +443,15 @@
  		gtk_widget_get_allocation(GTK_WIDGET(gp), &a);
  		gpwidth = a.width;
  		gpheight = a.height;
++		/* Read the scale factor now: at connect time the widget is not realized yet and reports 1 */
++		rfi->hidpi_factor = MAX(1, gtk_widget_get_scale_factor(GTK_WIDGET(gp)));
 +		if (remmina_rdp_event_dynres_hidpi(rfi)) {
 +			gpwidth *= rfi->hidpi_factor;
 +			gpheight *= rfi->hidpi_factor;
 +		}
  		prevwidth = remmina_plugin_service->protocol_plugin_get_width(gp);
  		prevheight = remmina_plugin_service->protocol_plugin_get_height(gp);
++		REMMINA_PLUGIN_DEBUG("Monitor layout: allocation scaled x%d -> %dx%d, current remote %dx%d", rfi->hidpi_factor, gpwidth, gpheight, prevwidth, prevheight);
  
-@@ -528,7 +551,7 @@
+ 		if ((gpwidth != prevwidth || gpheight != prevheight) && gpwidth >= 200 && gpheight >= 200) {
+ 			if (rfi->rdpgfxchan) {
+@@ -528,7 +554,7 @@
  	if (!rfi || !rfi->connected || rfi->is_reconnecting)
  		return;
  
@@ -75,7 +79,7 @@ diff -ru /tmp/claude-1000/-home-vladkarok-Work-omarchy-fixes/251c9174-d183-43e0-
  		*ox = (UINT16)(ix * remmina_plugin_service->protocol_plugin_get_width(gp) / rfi->scale_width);
  		*oy = (UINT16)(iy * remmina_plugin_service->protocol_plugin_get_height(gp) / rfi->scale_height);
  	} else {
-@@ -550,7 +573,7 @@
+@@ -550,7 +576,7 @@
  	if (!rfi || !rfi->connected || rfi->is_reconnecting)
  		return;
  
@@ -84,7 +88,7 @@ diff -ru /tmp/claude-1000/-home-vladkarok-Work-omarchy-fixes/251c9174-d183-43e0-
  		*ox = (ix * rfi->scale_width) / remmina_plugin_service->protocol_plugin_get_width(gp);
  		*oy = (iy * rfi->scale_height) / remmina_plugin_service->protocol_plugin_get_height(gp);
  	} else {
-@@ -1294,6 +1317,15 @@
+@@ -1294,6 +1320,15 @@
  
  	surface = cairo_image_surface_create_for_data(data, CAIRO_FORMAT_ARGB32, pointer->width, pointer->height, cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, pointer->width));
  	cairo_surface_flush(surface);
@@ -100,9 +104,8 @@ diff -ru /tmp/claude-1000/-home-vladkarok-Work-omarchy-fixes/251c9174-d183-43e0-
  	pixbuf = gdk_pixbuf_get_from_surface(surface, 0, 0, pointer->width, pointer->height);
  	cairo_surface_mark_dirty(surface);
  	cairo_surface_destroy(surface);
-diff -ru /tmp/claude-1000/-home-vladkarok-Work-omarchy-fixes/251c9174-d183-43e0-9a9c-c8f7fb60630a/scratchpad/rdp.orig/rdp_plugin.c plugins/rdp/rdp_plugin.c
---- a/plugins/rdp/rdp_plugin.c	2026-10-10 22:56:48.281362492 +0200
-+++ b/plugins/rdp/rdp_plugin.c	2026-10-10 22:56:48.297600660 +0200
+--- a/plugins/rdp/rdp_plugin.c
++++ b/plugins/rdp/rdp_plugin.c
 @@ -1782,6 +1782,12 @@
  
  	gint w = remmina_plugin_service->get_profile_remote_width(gp);
@@ -124,9 +127,8 @@ diff -ru /tmp/claude-1000/-home-vladkarok-Work-omarchy-fixes/251c9174-d183-43e0-
  
  	remminafile = remmina_plugin_service->protocol_plugin_get_file(gp);
  
-diff -ru /tmp/claude-1000/-home-vladkarok-Work-omarchy-fixes/251c9174-d183-43e0-9a9c-c8f7fb60630a/scratchpad/rdp.orig/rdp_plugin.h plugins/rdp/rdp_plugin.h
---- a/plugins/rdp/rdp_plugin.h	2026-10-10 22:56:48.281419279 +0200
-+++ b/plugins/rdp/rdp_plugin.h	2026-10-10 22:56:48.296175230 +0200
+--- a/plugins/rdp/rdp_plugin.h
++++ b/plugins/rdp/rdp_plugin.h
 @@ -355,6 +355,7 @@
  	gint			scale_height;
  	gdouble			scale_x;
