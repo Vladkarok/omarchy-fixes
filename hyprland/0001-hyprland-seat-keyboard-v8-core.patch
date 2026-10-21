@@ -1,0 +1,332 @@
+diff --git a/src/devices/IKeyboard.cpp b/src/devices/IKeyboard.cpp
+index 9fe531c..1135dd8 100644
+--- a/src/devices/IKeyboard.cpp
++++ b/src/devices/IKeyboard.cpp
+@@ -145,6 +145,10 @@ void IKeyboard::setKeymap(const SStringRuleNames& rules) {
+     xkb_context_unref(CONTEXT);
+ 
+     g_pSeatManager->updateActiveKeyboardData();
++
++    // The seat keyboard's new keymap resets the focused client's xkb state: tell it the modifiers again.
++    if (g_pSeatManager->m_keyboard == m_self)
++        g_pSeatManager->sendSeatKeyboardModifiers();
+ }
+ 
+ void IKeyboard::updateKeymapFD() {
+diff --git a/src/devices/IKeyboard.hpp b/src/devices/IKeyboard.hpp
+index 6f34063..8c22323 100644
+--- a/src/devices/IKeyboard.hpp
++++ b/src/devices/IKeyboard.hpp
+@@ -83,6 +83,9 @@ class IKeyboard : public IHID {
+ 
+     bool                              m_active     = false;
+     bool                              m_enabled    = true;
++    // Order of the last key press this keyboard produced (0 = none yet). When the seat keyboard goes away,
++    // the seat falls back to the enabled keyboard a key was most recently pressed on.
++    uint64_t                          m_lastKeyPressOrder = 0;
+     bool                              m_allowBinds = true;
+ 
+     // permission flag: whether this keyboard is allowed to be processed
+diff --git a/src/managers/SeatManager.cpp b/src/managers/SeatManager.cpp
+index 2f93c42..1e0540d 100644
+--- a/src/managers/SeatManager.cpp
++++ b/src/managers/SeatManager.cpp
+@@ -7,6 +7,7 @@
+ #include "../protocols/core/Compositor.hpp"
+ #include "../protocols/LayerShell.hpp"
+ #include "../protocols/InputCapture.hpp"
++#include "../protocols/InputMethodV2.hpp"
+ #include "../Compositor.hpp"
+ #include "../desktop/state/FocusState.hpp"
+ #include "../devices/IKeyboard.hpp"
+@@ -170,6 +171,41 @@ void CSeatManager::setKeyboard(SP<IKeyboard> KEEB) {
+         KEEB->m_active = true;
+ 
+     updateActiveKeyboardData();
++
++    // The client keeps the previous keyboard's layout group and locks otherwise (and loses them entirely when a
++    // new keymap was just sent): the keyboard that changed may be on another group even with an identical keymap.
++    sendSeatKeyboardModifiers();
++}
++
++void CSeatManager::sendSeatKeyboardModifiers() {
++    static auto PCAPTUREMODS = CConfigValue<Config::INTEGER>("input-capture:capture_modifiers");
++
++    if (!m_keyboard)
++        return;
++
++    // The same routing and state as a modifier event from the seat keyboard (CInputManager::onKeyboardMod):
++    // nothing while input capture takes modifiers or while an input method grabs the keyboard (unless the seat
++    // keyboard is the input method's own), and the seat keyboard's latched and locked modifiers and group with
++    // the depressed modifiers of every keyboard sharing state (an input method's own keyboard: unmerged).
++    if (*PCAPTUREMODS && PROTO::inputCapture->isCaptured())
++        return;
++
++    const auto KEYBOARD = m_keyboard.lock();
++
++    // A disabled keyboard's modifier events are ignored (onKeyboardMod); so is its state.
++    if (!KEYBOARD->m_enabled)
++        return;
++
++    const bool IMEKEYBOARD = KEYBOARD->isVirtual() && g_pInputManager->shouldIgnoreVirtualKeyboard(KEYBOARD);
++    const auto IME        = g_pInputManager->m_relay.m_inputMethod.lock();
++
++    if (IME && IME->hasGrab() && !IMEKEYBOARD)
++        return;
++
++    const auto& MODS      = KEYBOARD->m_modifiersState;
++    const auto  DEPRESSED = IMEKEYBOARD ? MODS.depressed : g_pInputManager->shareModsFromAllKBs(MODS.depressed);
++
++    sendKeyboardMods(DEPRESSED, MODS.latched, MODS.locked, MODS.group);
+ }
+ 
+ void CSeatManager::updateActiveKeyboardData() {
+diff --git a/src/managers/SeatManager.hpp b/src/managers/SeatManager.hpp
+index 578315a..e969d39 100644
+--- a/src/managers/SeatManager.hpp
++++ b/src/managers/SeatManager.hpp
+@@ -55,6 +55,8 @@ class CSeatManager {
+     void     setKeyboardFocus(SP<CWLSurfaceResource> surf);
+     void     sendKeyboardKey(uint32_t timeMs, uint32_t key, wl_keyboard_key_state state);
+     void     sendKeyboardMods(uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group);
++    // Sends the focused client the seat keyboard's modifiers and layout group, as a modifier event from it would.
++    void     sendSeatKeyboardModifiers();
+ 
+     void     setPointerFocus(SP<CWLSurfaceResource> surf, const Vector2D& local);
+     void     sendPointerMotion(uint32_t timeMs, const Vector2D& local);
+diff --git a/src/managers/input/InputManager.cpp b/src/managers/input/InputManager.cpp
+index 187dbe8..2292e4d 100644
+--- a/src/managers/input/InputManager.cpp
++++ b/src/managers/input/InputManager.cpp
+@@ -60,6 +60,7 @@
+ #include <aquamarine/input/Input.hpp>
+ #include <hyprutils/string/VarList.hpp>
+ #include <hyprutils/string/VarList2.hpp>
++#include <hyprutils/utils/ScopeGuard.hpp>
+ 
+ using namespace Hyprutils::String;
+ 
+@@ -1183,6 +1184,7 @@ void CInputManager::setupKeyboard(SP<IKeyboard> keeb) {
+ 
+         if (PKEEB == g_pSeatManager->m_keyboard) {
+             g_pSeatManager->updateActiveKeyboardData();
++            g_pSeatManager->sendSeatKeyboardModifiers();
+             g_pKeybindManager->m_keyToCodeCache.clear();
+         }
+ 
+@@ -1190,11 +1192,14 @@ void CInputManager::setupKeyboard(SP<IKeyboard> keeb) {
+         Event::bus()->m_events.input.keyboard.layout.emit(PKEEB, LAYOUT);
+     });
+ 
+-    disableAllKeyboards(false);
+-
+     applyConfigToKeyboard(keeb);
+ 
+-    g_pSeatManager->setKeyboard(keeb);
++    // A new physical keyboard becomes the seat keyboard, as before. A virtual one (an input method's, an
++    // on-screen keyboard's, a tool like wtype) does not take over just by appearing: its state is fresh, so
++    // clients, and an input method grab created right after, would be told its layout group 0 instead of the
++    // group of the keyboard in use. It becomes the seat keyboard when it produces input.
++    if (!keeb->isVirtual() || !g_pSeatManager->m_keyboard)
++        g_pSeatManager->setKeyboard(keeb);
+ 
+     keeb->updateLEDs();
+ 
+@@ -1211,6 +1216,10 @@ void CInputManager::setKeyboardLayout() {
+ }
+ 
+ void CInputManager::applyConfigToKeyboard(SP<IKeyboard> pKeyboard) {
++    const bool WASCONFIGURING = m_configuringKeyboard;
++    m_configuringKeyboard     = true;
++    Hyprutils::Utils::CScopeGuard x([this, WASCONFIGURING] { m_configuringKeyboard = WASCONFIGURING; });
++
+     auto       devname = pKeyboard->m_hlName;
+ 
+     const auto HASCONFIG = Config::mgr()->deviceConfigExists(devname);
+@@ -1538,23 +1547,38 @@ void CInputManager::destroyKeyboard(SP<IKeyboard> pKeyboard) {
+ 
+     std::erase_if(m_keyboards, [pKeyboard](const auto& other) { return other == pKeyboard; });
+ 
+-    if (!m_keyboards.empty()) {
+-        bool found = false;
+-        for (auto const& k : m_keyboards | std::views::reverse) {
+-            if (!k)
+-                continue;
++    // Another keyboard than the seat keyboard went away: the seat keyboard, and the layout group and locks
++    // clients get from it, stay as they are.
++    const auto CURRENT = g_pSeatManager->m_keyboard.lock();
++    if (!CURRENT || CURRENT == pKeyboard)
++        g_pSeatManager->setKeyboard(nextSeatKeyboard());
+ 
+-            g_pSeatManager->setKeyboard(k);
+-            found = true;
+-            break;
+-        }
++    removeFromHIDs(pKeyboard);
++}
+ 
+-        if (!found)
+-            g_pSeatManager->setKeyboard(nullptr);
+-    } else
+-        g_pSeatManager->setKeyboard(nullptr);
++// The seat keyboard went away (e.g. an input method's virtual keyboard on deactivation). Prefer the enabled,
++// allowed keyboard a key was most recently pressed on, so the next focused client gets the state of the keyboard
++// in use rather than that of whichever device was added last (after a resume that can be an idle built-in
++// keyboard on another layout group). Without key presses, or without such a keyboard, keep the old rule: the
++// last-added keyboard.
++SP<IKeyboard> CInputManager::nextSeatKeyboard() {
++    SP<IKeyboard> lastAdded, best;
+ 
+-    removeFromHIDs(pKeyboard);
++    for (auto const& k : m_keyboards | std::views::reverse) {
++        if (!k)
++            continue;
++
++        if (!lastAdded)
++            lastAdded = k;
++
++        if (!k->m_enabled || !k->m_allowed)
++            continue;
++
++        if (!best || k->m_lastKeyPressOrder > best->m_lastKeyPressOrder)
++            best = k;
++    }
++
++    return best ? best : lastAdded;
+ }
+ 
+ void CInputManager::destroyPointer(SP<IPointer> mouse) {
+@@ -1620,6 +1644,11 @@ void CInputManager::onKeyboardKey(const IKeyboard::SKeyEvent& event, SP<IKeyboar
+     if (!pKeyboard->m_enabled || !pKeyboard->m_allowed)
+         return;
+ 
++    if (event.state == WL_KEYBOARD_KEY_STATE_PRESSED) {
++        static uint64_t keyPresses      = 0;
++        pKeyboard->m_lastKeyPressOrder = ++keyPresses;
++    }
++
+     const bool           DISALLOWACTION = pKeyboard->isVirtual() && shouldIgnoreVirtualKeyboard(pKeyboard);
+ 
+     const auto           IME    = m_relay.m_inputMethod.lock();
+@@ -1711,13 +1740,34 @@ void CInputManager::onKeyboardMod(SP<IKeyboard> pKeyboard) {
+         m_lastMods         = MODS.depressed; // for hyprland keybinds use; not for sending to seat
+     }
+ 
+-    if (USEIME) {
++    if (m_configuringKeyboard) {
++        // Configuration (numlock_by_default on a new keyboard, a reload) is not input: it must not change which
++        // keyboard the seat or an input method grab follows while that keyboard is there, enabled and (for a
++        // grab) not the input method's own output. Each still gets its own keyboard's state, which this change
++        // may have touched (the keyboard itself, or the depressed modifiers it shares). With nothing usable to
++        // keep, this keyboard is followed, as before.
++        if (USEIME) {
++            IME->forEachGrab([&](SP<CInputMethodKeyboardGrabV2> grab) {
++                const auto KB = grab->followedKeyboard();
++                if (!KB || !KB->m_enabled || (KB->isVirtual() && shouldIgnoreVirtualKeyboard(KB))) {
++                    grab->sendKeyboardData(pKeyboard);
++                    grab->sendMods(MODS.depressed, MODS.latched, MODS.locked, MODS.group);
++                    return;
++                }
++                const auto& STATE = KB->m_modifiersState;
++                grab->sendMods(shareModsFromAllKBs(STATE.depressed), STATE.latched, STATE.locked, STATE.group);
++            });
++        } else if (const auto SEAT = g_pSeatManager->m_keyboard.lock(); !SEAT || !SEAT->m_enabled)
++            g_pSeatManager->setKeyboard(pKeyboard); // sends these same modifiers to the focused client
++        else
++            g_pSeatManager->sendSeatKeyboardModifiers();
++    } else if (USEIME) {
+         IME->setKeyboard(pKeyboard);
+         IME->sendMods(MODS.depressed, MODS.latched, MODS.locked, MODS.group);
+-    } else {
+-        g_pSeatManager->setKeyboard(pKeyboard);
++    } else if (g_pSeatManager->m_keyboard.get() != pKeyboard.get()) {
++        g_pSeatManager->setKeyboard(pKeyboard); // sends these same modifiers to the focused client
++    } else
+         g_pSeatManager->sendKeyboardMods(MODS.depressed, MODS.latched, MODS.locked, MODS.group);
+-    }
+ 
+     updateKeyboardsLeds(pKeyboard);
+ 
+diff --git a/src/managers/input/InputManager.hpp b/src/managers/input/InputManager.hpp
+index 9c32988..bb491e7 100644
+--- a/src/managers/input/InputManager.hpp
++++ b/src/managers/input/InputManager.hpp
+@@ -190,6 +190,7 @@ class CInputManager {
+     // for shared mods
+     const std::vector<uint32_t>& getKeysFromAllKBs();
+     uint32_t                     getModsFromAllKBs();
++    uint32_t                     shareModsFromAllKBs(uint32_t depressed);
+ 
+     // for virtual keyboards: whether we should respect them as normal ones
+     bool        shouldIgnoreVirtualKeyboard(SP<IKeyboard>);
+@@ -252,6 +253,11 @@ class CInputManager {
+     SP<CTabletTool>    ensureTabletToolPresent(SP<Aquamarine::ITabletTool>);
+ 
+     void               applyConfigToKeyboard(SP<IKeyboard>);
++    SP<IKeyboard>      nextSeatKeyboard();
++    // Set while a keyboard is being configured: modifier changes that configuration causes (numlock_by_default)
++    // are not input; they do not take the seat or an input method grab away from a usable keyboard (see
++    // onKeyboardMod).
++    bool               m_configuringKeyboard = false;
+ 
+     // this will be set after a refocus()
+     WP<CWLSurfaceResource> m_foundSurfaceToFocus;
+@@ -301,7 +307,6 @@ class CInputManager {
+     bool                  m_pointerAxisFramePending = false;
+ 
+     bool                  shareKeyFromAllKBs(uint32_t key, bool pressed);
+-    uint32_t              shareModsFromAllKBs(uint32_t depressed);
+     std::vector<uint32_t> m_pressed;
+     uint32_t              m_lastMods = 0;
+ 
+diff --git a/src/protocols/InputMethodV2.cpp b/src/protocols/InputMethodV2.cpp
+index 0917d10..4eaae0e 100644
+--- a/src/protocols/InputMethodV2.cpp
++++ b/src/protocols/InputMethodV2.cpp
+@@ -56,6 +56,10 @@ void CInputMethodKeyboardGrabV2::sendKeyboardData(SP<IKeyboard> keyboard) {
+     m_resource->sendRepeatInfo(keyboard->m_repeatRate, keyboard->m_repeatDelay);
+ }
+ 
++SP<IKeyboard> CInputMethodKeyboardGrabV2::followedKeyboard() {
++    return m_lastKeyboard.lock();
++}
++
+ void CInputMethodKeyboardGrabV2::sendKey(uint32_t time, uint32_t key, wl_keyboard_key_state state) {
+     const auto SERIAL = g_pSeatManager->nextSerial(g_pSeatManager->seatResourceForClient(m_resource->client()));
+ 
+@@ -324,6 +328,15 @@ void CInputMethodV2::setKeyboard(SP<IKeyboard> keyboard) {
+     }
+ }
+ 
++void CInputMethodV2::forEachGrab(const std::function<void(SP<CInputMethodKeyboardGrabV2>)>& fn) {
++    for (auto const& gw : m_grabs) {
++        auto g = gw.lock();
++
++        if (g)
++            fn(g);
++    }
++}
++
+ wl_client* CInputMethodV2::client() {
+     return m_resource->client();
+ }
+diff --git a/src/protocols/InputMethodV2.hpp b/src/protocols/InputMethodV2.hpp
+index b948d60..19f77d7 100644
+--- a/src/protocols/InputMethodV2.hpp
++++ b/src/protocols/InputMethodV2.hpp
+@@ -60,6 +60,7 @@ class CInputMethodV2 {
+     void       sendKey(uint32_t time, uint32_t key, wl_keyboard_key_state state);
+     void       sendMods(uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group);
+     void       setKeyboard(SP<IKeyboard> keyboard);
++    void       forEachGrab(const std::function<void(SP<CInputMethodKeyboardGrabV2>)>& fn);
+ 
+     wl_client* client();
+     wl_client* grabClient();
+@@ -92,6 +93,7 @@ class CInputMethodKeyboardGrabV2 {
+     void               sendKey(uint32_t time, uint32_t key, wl_keyboard_key_state state);
+     void               sendMods(uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group);
+     void               sendKeyboardData(SP<IKeyboard> keyboard);
++    SP<IKeyboard>      followedKeyboard(); // the keyboard whose keymap and modifiers this grab was last given
+ 
+   private:
+     SP<CZwpInputMethodKeyboardGrabV2> m_resource;

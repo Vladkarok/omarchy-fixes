@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# ~/.config/omarchy/hooks/pre-refresh-pacman.d/10-local-patched-repo
+#
+# Puts the local-patched repository (/etc/pacman.d/custom-repos.conf) first
+# in /etc/pacman.conf, so the -Syyuu that follows keeps the patched hyprland,
+# hyprpm and remmina instead of reinstalling Arch's builds.
+#
+# omarchy-refresh-pacman runs this after it copies the channel template over
+# /etc/pacman.conf and before `pacman -Syyuu`. That covers `omarchy channel
+# set`, `omarchy refresh pacman` and omarchy-reinstall-pkgs. The hook runs
+# with an empty sudo cache, and Omarchy's no-update wrapper turns `sudo`
+# into `sudo -N`, so every sudo call asks for the password. This hook makes
+# one sudo call, and only when the Include line is missing.
+#
+# omarchy-hook only prints "Hook failed" and carries on, so a failed or
+# cancelled edit still lets -Syyuu downgrade. The check at the end says so
+# loudly. Run this file again to restore the Include line; `omarchy update`
+# then reinstalls each patched build that is newer than the installed one.
+
+set -uo pipefail
+
+CONF=/etc/pacman.conf
+SNIPPET=/etc/pacman.d/custom-repos.conf
+MARKER="Include = $SNIPPET"
+REPO=local-patched
+
+# pacman treats an Include of a missing file as a fatal config error.
+[[ -r $SNIPPET ]] || exit 0
+
+if ! grep -qxF "$MARKER" "$CONF"; then
+  # Same edit as Omarchy's add-custom-repo.sample: the line lands above
+  # [omarchy], among the [options] lines, where migration 1791403252's
+  # reordering keeps it in front of every repository.
+  sudo sed -i "0,/^\[omarchy\]/s||$MARKER\n\n[omarchy]|" "$CONF"
+fi
+
+first=$(pacman-conf --config "$CONF" --repo-list 2>/dev/null | head -n 1)
+if [[ $first != "$REPO" ]]; then
+  echo -e "\e[31m[$REPO] is not the first repository in $CONF (first: ${first:-none})." >&2
+  echo -e "This upgrade can replace the patched hyprland, hyprpm and remmina.\e[0m" >&2
+  exit 1
+fi

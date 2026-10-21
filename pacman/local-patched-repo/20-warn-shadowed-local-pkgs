@@ -1,0 +1,59 @@
+#!/bin/bash
+
+# ~/.config/omarchy/hooks/post-update.d/20-warn-shadowed-local-pkgs
+#
+# [local-patched] is the first repository, so pacman never offers another
+# repository's build of a package it lists. omarchy update refreshes every
+# database before post-update hooks run; this reads them and says when:
+#   - Arch or Omarchy has a newer build than the published patched one
+#     (rebuild with the patches on top of it, then publish-local-pkg.sh);
+#   - the installed version is not the published one;
+#   - pacman.conf lost the Include line (the pre-refresh-pacman hook failed
+#     or was cancelled during a channel switch).
+# It only reads pacman's configuration and databases and needs no sudo.
+
+REPO=local-patched
+SNIPPET=/etc/pacman.d/custom-repos.conf
+
+warn() {
+  echo -e "\e[33m\nLocally patched packages need attention:\e[0m"
+  printf '  %s\n' "$@"
+  echo
+  if command -v notify-send >/dev/null; then
+    notify-send -u normal "Locally patched packages" "$(printf '%s\n' "$@")" || true
+  fi
+}
+
+if [[ -r $SNIPPET ]] && ! pacman-conf --repo-list 2>/dev/null | grep -qxF "$REPO"; then
+  warn "[$REPO] is missing from /etc/pacman.conf, so pacman can replace the patched builds." \
+    "Run ~/.config/omarchy/hooks/pre-refresh-pacman.d/10-local-patched-repo, then omarchy update."
+  exit 0
+fi
+
+declare -A ours newest where
+while read -r repo name version _; do
+  if [[ $repo == "$REPO" ]]; then
+    ours[$name]=$version
+  elif [[ -z ${newest[$name]:-} ]] || (($(vercmp "$version" "${newest[$name]}") > 0)); then
+    newest[$name]=$version
+    where[$name]=$repo
+  fi
+done < <(pacman -Sl 2>/dev/null)
+
+((${#ours[@]})) || exit 0
+
+messages=()
+for name in "${!ours[@]}"; do
+  mine=${ours[$name]}
+  other=${newest[$name]:-}
+  if [[ -n $other ]] && (($(vercmp "$other" "$mine") > 0)); then
+    messages+=("$name: ${where[$name]} has $other, $REPO has $mine")
+  fi
+  installed=$(pacman -Q -- "$name" 2>/dev/null | awk -v n="$name" '$1 == n { print $2 }')
+  if [[ -n $installed && $installed != "$mine" ]]; then
+    messages+=("$name: installed $installed is not the $REPO build $mine")
+  fi
+done
+
+((${#messages[@]})) && warn "${messages[@]}"
+exit 0

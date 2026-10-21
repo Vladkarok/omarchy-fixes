@@ -1,0 +1,17 @@
+diff --git a/src/Compositor.cpp b/src/Compositor.cpp
+index 1d2d8b9..271c736 100644
+--- a/src/Compositor.cpp
++++ b/src/Compositor.cpp
+@@ -509,6 +509,12 @@ void CCompositor::initAllSignals() {
+ 
+                 for (auto const& m : State::monitorState()->monitors()) {
+                     m->m_activeMonitorRule = {}; // rules were lost
++
++                    // The monitor reload scheduled below is processed in render pre-checks, and the
++                    // DRM restore only re-presents the pre-suspend buffer, so an idle output keeps
++                    // that stale frame until something else renders. Kick it and repaint.
++                    g_pHyprRenderer->damageMonitor(m);
++                    m->scheduleFrame();
+                 }
+ 
+                 Config::monitorRuleMgr()->scheduleReload();

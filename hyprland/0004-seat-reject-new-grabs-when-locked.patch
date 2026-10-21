@@ -1,0 +1,28 @@
+From 7b5b0c192e22411103470edf32598d250a86857b Mon Sep 17 00:00:00 2001
+From: Vaxry <43317083+vaxerski@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 20:28:24 +0200
+Subject: [PATCH] seat: reject new grabs when the session is locked (#16547)
+
+Found by Ada Logics and Anthropic
+---
+ src/managers/SeatManager.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/managers/SeatManager.cpp b/src/managers/SeatManager.cpp
+index 04d8fc4..47419dd 100644
+--- a/src/managers/SeatManager.cpp
++++ b/src/managers/SeatManager.cpp
+@@ -753,6 +753,10 @@ void CSeatManager::setCurrentPrimarySelection(SP<IDataSource> source) {
+ }
+ 
+ void CSeatManager::setGrab(SP<CSeatGrab> grab) {
++    // Do not grab when we have a lockscreen - no surface should grab in those cases.
++    if (g_pInputManager->isLocked() && grab)
++        return;
++
+     if (m_seatGrab) {
+         auto oldGrab = m_seatGrab;
+ 
+-- 
+2.56.0
+
