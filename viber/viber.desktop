@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Viber
+Comment=Viber VoIP and messenger
+# Hide CUDA from Viber. Its Qt Multimedia probes CUDA at startup, and the probe
+# leaves the NVIDIA GPU registered with nvidia-uvm for as long as Viber runs,
+# which blocks runtime D3. With no visible device cuInit fails before opening
+# any /dev/nvidia* node. Video decode in Viber falls back to the CPU.
+Exec=env CUDA_VISIBLE_DEVICES=-1 /usr/bin/viber %u
+Icon=viber
+Terminal=false
+Type=Application
+Categories=Network;InstantMessaging;P2P;
+MimeType=x-scheme-handler/viber;
