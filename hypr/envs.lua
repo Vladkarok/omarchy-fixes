@@ -19,4 +19,6 @@ hl.env("LIBVA_DRIVER_NAME", "iHD")
 
 -- Extra env variables (ported from the pre-quattro envs.conf).
 hl.env("SDL_VIDEODRIVER", "wayland")
+-- Keep Omasnap's timed preview (with Save As) instead of the --notify toast.
+hl.env("OMASNAP_NOTIFY", "0")
 hl.env("OMARCHY_SCREENSHOT_DIR", (os.getenv("HOME") or "") .. "/Pictures/Screenshots")
