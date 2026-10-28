@@ -1,8 +1,8 @@
 diff --git a/src/devices/IKeyboard.cpp b/src/devices/IKeyboard.cpp
-index 9fe531c..1135dd8 100644
+index ab78bce..042a343 100644
 --- a/src/devices/IKeyboard.cpp
 +++ b/src/devices/IKeyboard.cpp
-@@ -145,6 +145,10 @@ void IKeyboard::setKeymap(const SStringRuleNames& rules) {
+@@ -146,6 +146,10 @@ void IKeyboard::setKeymap(const SStringRuleNames& rules) {
      xkb_context_unref(CONTEXT);
  
      g_pSeatManager->updateActiveKeyboardData();
@@ -14,10 +14,10 @@ index 9fe531c..1135dd8 100644
  
  void IKeyboard::updateKeymapFD() {
 diff --git a/src/devices/IKeyboard.hpp b/src/devices/IKeyboard.hpp
-index 6f34063..8c22323 100644
+index e410755..1faf2d2 100644
 --- a/src/devices/IKeyboard.hpp
 +++ b/src/devices/IKeyboard.hpp
-@@ -83,6 +83,9 @@ class IKeyboard : public IHID {
+@@ -73,6 +73,9 @@ class IKeyboard : public IHID {
  
      bool                              m_active     = false;
      bool                              m_enabled    = true;
@@ -28,7 +28,7 @@ index 6f34063..8c22323 100644
  
      // permission flag: whether this keyboard is allowed to be processed
 diff --git a/src/managers/SeatManager.cpp b/src/managers/SeatManager.cpp
-index 2f93c42..1e0540d 100644
+index 47419dd..7f4e559 100644
 --- a/src/managers/SeatManager.cpp
 +++ b/src/managers/SeatManager.cpp
 @@ -7,6 +7,7 @@
@@ -39,7 +39,7 @@ index 2f93c42..1e0540d 100644
  #include "../Compositor.hpp"
  #include "../desktop/state/FocusState.hpp"
  #include "../devices/IKeyboard.hpp"
-@@ -170,6 +171,41 @@ void CSeatManager::setKeyboard(SP<IKeyboard> KEEB) {
+@@ -227,6 +228,41 @@ void CSeatManager::setKeyboard(SP<IKeyboard> KEEB) {
          KEEB->m_active = true;
  
      updateActiveKeyboardData();
@@ -75,30 +75,30 @@ index 2f93c42..1e0540d 100644
 +        return;
 +
 +    const auto& MODS      = KEYBOARD->m_modifiersState;
-+    const auto  DEPRESSED = IMEKEYBOARD ? MODS.depressed : g_pInputManager->shareModsFromAllKBs(MODS.depressed);
++    const auto  DEPRESSED = IMEKEYBOARD ? MODS.depressed : g_pInputManager->shareXkbModsFromAllKBs(KEYBOARD, MODS.depressed);
 +
 +    sendKeyboardMods(DEPRESSED, MODS.latched, MODS.locked, MODS.group);
  }
  
  void CSeatManager::updateActiveKeyboardData() {
 diff --git a/src/managers/SeatManager.hpp b/src/managers/SeatManager.hpp
-index 578315a..e969d39 100644
+index b7a9e7e..daa11bd 100644
 --- a/src/managers/SeatManager.hpp
 +++ b/src/managers/SeatManager.hpp
-@@ -55,6 +55,8 @@ class CSeatManager {
-     void     setKeyboardFocus(SP<CWLSurfaceResource> surf);
-     void     sendKeyboardKey(uint32_t timeMs, uint32_t key, wl_keyboard_key_state state);
-     void     sendKeyboardMods(uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group);
+@@ -83,6 +83,8 @@ class CSeatManager {
+     void                       setKeyboardFocus(SP<CWLSurfaceResource> surf);
+     void                       sendKeyboardKey(uint32_t timeMs, uint32_t key, wl_keyboard_key_state state);
+     void                       sendKeyboardMods(uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group);
 +    // Sends the focused client the seat keyboard's modifiers and layout group, as a modifier event from it would.
-+    void     sendSeatKeyboardModifiers();
++    void                       sendSeatKeyboardModifiers();
  
-     void     setPointerFocus(SP<CWLSurfaceResource> surf, const Vector2D& local);
-     void     sendPointerMotion(uint32_t timeMs, const Vector2D& local);
+     CKeyboardEventHandlerStack m_keyboardEventHandlers;
+ 
 diff --git a/src/managers/input/InputManager.cpp b/src/managers/input/InputManager.cpp
-index 187dbe8..2292e4d 100644
+index b39f439..e70e55d 100644
 --- a/src/managers/input/InputManager.cpp
 +++ b/src/managers/input/InputManager.cpp
-@@ -60,6 +60,7 @@
+@@ -62,6 +62,7 @@
  #include <aquamarine/input/Input.hpp>
  #include <hyprutils/string/VarList.hpp>
  #include <hyprutils/string/VarList2.hpp>
@@ -106,15 +106,15 @@ index 187dbe8..2292e4d 100644
  
  using namespace Hyprutils::String;
  
-@@ -1183,6 +1184,7 @@ void CInputManager::setupKeyboard(SP<IKeyboard> keeb) {
+@@ -1185,6 +1186,7 @@ void CInputManager::setupKeyboard(SP<IKeyboard> keeb) {
  
          if (PKEEB == g_pSeatManager->m_keyboard) {
              g_pSeatManager->updateActiveKeyboardData();
 +            g_pSeatManager->sendSeatKeyboardModifiers();
-             g_pKeybindManager->m_keyToCodeCache.clear();
+             Keybinds::resolver()->clearKeycodeCache();
          }
  
-@@ -1190,11 +1192,14 @@ void CInputManager::setupKeyboard(SP<IKeyboard> keeb) {
+@@ -1192,11 +1194,14 @@ void CInputManager::setupKeyboard(SP<IKeyboard> keeb) {
          Event::bus()->m_events.input.keyboard.layout.emit(PKEEB, LAYOUT);
      });
  
@@ -132,7 +132,7 @@ index 187dbe8..2292e4d 100644
  
      keeb->updateLEDs();
  
-@@ -1211,6 +1216,10 @@ void CInputManager::setKeyboardLayout() {
+@@ -1213,6 +1218,10 @@ void CInputManager::setKeyboardLayout() {
  }
  
  void CInputManager::applyConfigToKeyboard(SP<IKeyboard> pKeyboard) {
@@ -143,8 +143,8 @@ index 187dbe8..2292e4d 100644
      auto       devname = pKeyboard->m_hlName;
  
      const auto HASCONFIG = Config::mgr()->deviceConfigExists(devname);
-@@ -1538,23 +1547,38 @@ void CInputManager::destroyKeyboard(SP<IKeyboard> pKeyboard) {
- 
+@@ -1546,23 +1555,38 @@ void CInputManager::destroyKeyboard(SP<IKeyboard> pKeyboard) {
+     g_pSeatManager->m_keyboardEventHandlers.onKeyboardRemoved(pKeyboard);
      std::erase_if(m_keyboards, [pKeyboard](const auto& other) { return other == pKeyboard; });
  
 -    if (!m_keyboards.empty()) {
@@ -196,7 +196,7 @@ index 187dbe8..2292e4d 100644
  }
  
  void CInputManager::destroyPointer(SP<IPointer> mouse) {
-@@ -1620,6 +1644,11 @@ void CInputManager::onKeyboardKey(const IKeyboard::SKeyEvent& event, SP<IKeyboar
+@@ -1702,6 +1726,11 @@ void CInputManager::onKeyboardKey(const IKeyboard::SKeyEvent& event, SP<IKeyboar
      if (!pKeyboard->m_enabled || !pKeyboard->m_allowed)
          return;
  
@@ -208,8 +208,8 @@ index 187dbe8..2292e4d 100644
      const bool           DISALLOWACTION = pKeyboard->isVirtual() && shouldIgnoreVirtualKeyboard(pKeyboard);
  
      const auto           IME    = m_relay.m_inputMethod.lock();
-@@ -1711,13 +1740,34 @@ void CInputManager::onKeyboardMod(SP<IKeyboard> pKeyboard) {
-         m_lastMods         = MODS.depressed; // for hyprland keybinds use; not for sending to seat
+@@ -1800,13 +1829,34 @@ void CInputManager::onKeyboardMod(SP<IKeyboard> pKeyboard) {
+         m_lastMods = ALLMODS;
      }
  
 -    if (USEIME) {
@@ -228,7 +228,7 @@ index 187dbe8..2292e4d 100644
 +                    return;
 +                }
 +                const auto& STATE = KB->m_modifiersState;
-+                grab->sendMods(shareModsFromAllKBs(STATE.depressed), STATE.latched, STATE.locked, STATE.group);
++                grab->sendMods(shareXkbModsFromAllKBs(KB, STATE.depressed), STATE.latched, STATE.locked, STATE.group);
 +            });
 +        } else if (const auto SEAT = g_pSeatManager->m_keyboard.lock(); !SEAT || !SEAT->m_enabled)
 +            g_pSeatManager->setKeyboard(pKeyboard); // sends these same modifiers to the focused client
@@ -247,19 +247,31 @@ index 187dbe8..2292e4d 100644
  
      updateKeyboardsLeds(pKeyboard);
  
+@@ -1971,6 +2021,10 @@ bool CInputManager::shareKeyFromAllKBs(uint32_t key, bool pressed) {
+     return finalState;
+ }
+ 
++uint32_t CInputManager::shareXkbModsFromAllKBs(SP<IKeyboard> relative, uint32_t depressed) {
++    return depressed | hyprlandModsToXkb(relative, shareModsFromAllKBs(xkbModsToHyprland(relative, depressed)));
++}
++
+ Input::ModifierMask CInputManager::shareModsFromAllKBs(Input::ModifierMask mask) {
+     Input::ModifierMask finalMask = mask;
+ 
 diff --git a/src/managers/input/InputManager.hpp b/src/managers/input/InputManager.hpp
-index 9c32988..bb491e7 100644
+index 225e286..1474285 100644
 --- a/src/managers/input/InputManager.hpp
 +++ b/src/managers/input/InputManager.hpp
-@@ -190,6 +190,7 @@ class CInputManager {
+@@ -211,6 +211,8 @@ class CInputManager {
      // for shared mods
      const std::vector<uint32_t>& getKeysFromAllKBs();
-     uint32_t                     getModsFromAllKBs();
-+    uint32_t                     shareModsFromAllKBs(uint32_t depressed);
+     Input::ModifierMask          getModsFromAllKBs();
++    // relative's depressed xkb modifiers merged with those of every keyboard sharing state, as onKeyboardMod sends
++    uint32_t                     shareXkbModsFromAllKBs(SP<IKeyboard> relative, uint32_t depressed);
+     Input::ModifierMask          xkbModsToHyprland(SP<IKeyboard> relative, uint32_t mask);
+     uint32_t                     hyprlandModsToXkb(SP<IKeyboard> relative, Input::ModifierMask mask);
  
-     // for virtual keyboards: whether we should respect them as normal ones
-     bool        shouldIgnoreVirtualKeyboard(SP<IKeyboard>);
-@@ -252,6 +253,11 @@ class CInputManager {
+@@ -277,6 +279,11 @@ class CInputManager {
      SP<CTabletTool>    ensureTabletToolPresent(SP<Aquamarine::ITabletTool>);
  
      void               applyConfigToKeyboard(SP<IKeyboard>);
@@ -271,16 +283,8 @@ index 9c32988..bb491e7 100644
  
      // this will be set after a refocus()
      WP<CWLSurfaceResource> m_foundSurfaceToFocus;
-@@ -301,7 +307,6 @@ class CInputManager {
-     bool                  m_pointerAxisFramePending = false;
- 
-     bool                  shareKeyFromAllKBs(uint32_t key, bool pressed);
--    uint32_t              shareModsFromAllKBs(uint32_t depressed);
-     std::vector<uint32_t> m_pressed;
-     uint32_t              m_lastMods = 0;
- 
 diff --git a/src/protocols/InputMethodV2.cpp b/src/protocols/InputMethodV2.cpp
-index 0917d10..4eaae0e 100644
+index 199fc24..5bb60ae 100644
 --- a/src/protocols/InputMethodV2.cpp
 +++ b/src/protocols/InputMethodV2.cpp
 @@ -56,6 +56,10 @@ void CInputMethodKeyboardGrabV2::sendKeyboardData(SP<IKeyboard> keyboard) {

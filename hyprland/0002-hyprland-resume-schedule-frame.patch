@@ -1,8 +1,8 @@
 diff --git a/src/Compositor.cpp b/src/Compositor.cpp
-index 1d2d8b9..271c736 100644
+index 25f0e63..180e58e 100644
 --- a/src/Compositor.cpp
 +++ b/src/Compositor.cpp
-@@ -509,6 +509,12 @@ void CCompositor::initAllSignals() {
+@@ -515,6 +515,12 @@ void CCompositor::initAllSignals() {
  
                  for (auto const& m : State::monitorState()->monitors()) {
                      m->m_activeMonitorRule = {}; // rules were lost
