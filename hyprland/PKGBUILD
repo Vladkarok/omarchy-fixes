@@ -5,8 +5,10 @@
 
 pkgname=(hyprland hyprpm)
 pkgver=0.57.0
-pkgrel=1.1
+# Local: Omarchy's 0.57.0-2 plus the seat-keyboard and resume patches
+pkgrel=2.1
 pkgdesc='a highly customizable dynamic tiling Wayland compositor'
+# Built for x86_64 too, so PCs get the patches below and move with the titlebars plugin: see README.md
 arch=(x86_64 aarch64)
 url="https://github.com/hyprwm/${pkgname^}"
 license=(BSD-3-Clause)
@@ -69,15 +71,28 @@ optdepends=('hyprpm: build and install plugins'
 provides=(wayland-compositor)
 _archive="${pkgname^}-$pkgver"
 source=("$_archive.tar.gz::$url/releases/download/v$pkgver/source-v$pkgver.tar.gz"
+        nvidia-egl-teardown.patch
+        wl-output-global-grace.patch
+        monitor-rule-vrr.patch
         0001-hyprland-seat-keyboard-v8-core.patch
         0002-hyprland-resume-schedule-frame.patch)
 sha256sums=('82d006ba9264fe67266c7d583c16f1a6c64d51424dbdc472c3e9c9d5ddfcd559'
+            '26d62139b8ae55e286bcdff1838a6bc01a021d8f1039b40b8fa523df83f61610'
+            '8fa0f57dc1b3246ab4e30ae81419150f4af7767fb31e739e36c824c6d99fab73'
+            'c14fb0ec02d97100bcfa4e5c8daaf524972fa5c665e04960619744ba01c73c39'
             '485bc8d48fddaa997fcd366f50c15117241639700f681253c1e1383cffb62286'
             '61153d07ce4aa3c5b4e86acdffdbda7420214d1dd551f0d95d9ebf185c22afb6')
 
 prepare() {
 	ln -sf hyprland-source "$_archive"
 	cd "$_archive"
+	# Release the EGL context before teardown; NVIDIA's EGL crashes on exit otherwise
+	patch -Np1 --fuzz=0 -i "$srcdir/nvidia-egl-teardown.patch"
+	# Destroying a wl_output global that clients may still be binding kills every client
+	# when a dock's output flaps; wait before destroying it, as wlroots does
+	patch -Np1 --fuzz=0 -i "$srcdir/wl-output-global-grace.patch"
+	# A reload ignored a monitor rule's vrr unless something else about the rule changed
+	patch -Np1 --fuzz=0 -i "$srcdir/monitor-rule-vrr.patch"
 	sed -i -e '/^release:/{n;s/-D/-DCMAKE_SKIP_RPATH=ON -D/}' Makefile
 	sed -i -e '/find_package.glaze/s/7...<8 //' {.,hyprpm,start}/CMakeLists.txt
 	# Local: keep the seat keyboard and its layout group/modifiers across devices
