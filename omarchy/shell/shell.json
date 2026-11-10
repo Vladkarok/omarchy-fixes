@@ -1,0 +1,119 @@
+{
+  "bar": {
+    "background": "opaque",
+    "layout": {
+      "center": [
+        {
+          "id": "omarchy.elsewhen",
+          "zones": "Rome|Europe/Rome, Delhi|Asia/Kolkata, Tokyo|Asia/Tokyo, Los Angeles|America/Los_Angeles, New York|America/New_York"
+        },
+        {
+          "format": "ddd d MMM HH:mm",
+          "formatAlt": "d MMMM 'W'ww yyyy",
+          "id": "omarchy.clock",
+          "lifeExpectancy": 90,
+          "verticalFormat": "HH\n—\nmm"
+        }
+      ],
+      "centerBegin": [
+        {
+          "id": "omarchy.indicators"
+        }
+      ],
+      "centerEnd": [
+        {
+          "id": "omarchy.keyboard-layout"
+        },
+        {
+          "id": "omarchy.weather"
+        },
+        {
+          "id": "omarchy.system-update"
+        },
+        {
+          "id": "glafeara.wireguard",
+          "multiTunnel": true
+        }
+      ],
+      "left": [
+        {
+          "id": "omarchy.menu"
+        },
+        {
+          "id": "omarchy.workspaces"
+        },
+        {
+          "id": "akshar.radio-atlas"
+        }
+      ],
+      "right": [
+        {
+          "id": "omarchy.tray"
+        },
+        {
+          "id": "io.github.vladkarok.omabump",
+          "mutedApps": [],
+          "refreshIntervalSec": 900,
+          "showMise": true,
+          "skippedVersions": {
+            "mise:codex": "0.167.0"
+          }
+        },
+        {
+          "id": "omarchy.tailscale"
+        },
+        {
+          "id": "io.github.vladkarok.oskar"
+        },
+        {
+          "id": "omarchy.agents"
+        },
+        {
+          "id": "omarchy.bluetooth"
+        },
+        {
+          "id": "omarchy.network"
+        },
+        {
+          "id": "omarchy.audio"
+        },
+        {
+          "id": "omarchy.monitor"
+        },
+        {
+          "historySamples": 60,
+          "id": "stappmus.activity-monitor",
+          "openExpanded": true,
+          "processPowerEnabled": true,
+          "samplingSpeed": "Balanced",
+          "showFrequencies": true,
+          "temperatureUnit": "Celsius"
+        },
+        {
+          "id": "omarchy.power",
+          "showPercentage": true
+        }
+      ],
+      "tray": []
+    },
+    "position": "top"
+  },
+  "cloneSourceRestores": [
+    "io.github.sirjul1337.lock-explorer"
+  ],
+  "disabledPlugins": [
+    "omarchy.lock"
+  ],
+  "idle": {
+    "lock": 300,
+    "screensaver": 150
+  },
+  "plugins": [
+    {
+      "blankMs": 60000,
+      "design": "card",
+      "id": "io.github.sirjul1337.lock-explorer"
+    }
+  ],
+  "version": 1
+}

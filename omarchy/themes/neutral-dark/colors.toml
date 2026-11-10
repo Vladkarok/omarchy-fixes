@@ -1,0 +1,34 @@
+mode = "dark"
+
+# Neutral surfaces: equal RGB channels avoid a warm, cool, or sepia cast.
+accent = "#4e83d1"
+selection = "#3a3a3a"
+muted = "#5a5a5a"
+
+background = "#1e1e1e"
+dark_background = "#181818"
+darker_background = "#121212"
+lighter_background = "#2a2a2a"
+
+foreground = "#d4d4d4"
+dark_foreground = "#6e6e6e"
+light_foreground = "#bdbdbd"
+bright_foreground = "#ffffff"
+
+# Hue-correct ANSI colors. Normal variants are restrained for long sessions;
+# bright variants remain clearly saturated when an application requests them.
+red = "#d44a4a"
+yellow = "#c9a227"
+orange = "#d97832"
+green = "#4fae5a"
+cyan = "#3aa6b9"
+blue = "#4e83d1"
+magenta = "#a865b5"
+brown = "#70442e"
+
+bright_red = "#ff5c5c"
+bright_yellow = "#f0c94c"
+bright_green = "#69d474"
+bright_cyan = "#55c9dd"
+bright_blue = "#6ea5f2"
+bright_magenta = "#cf7cdd"
