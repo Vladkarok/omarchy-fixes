@@ -1,0 +1,11 @@
+[Unit]
+Description=Snapper timeline snapshot of /home
+# Own timer on purpose: Omarchy's install/config/snapper.sh resets
+# /etc/conf.d/snapper to SNAPPER_CONFIGS="root" and disables
+# snapper-timeline.timer, so the stock timeline would silently stop.
+ConditionPathExists=/etc/snapper/configs/home
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/snapper -c home create --cleanup-algorithm timeline --description timeline
+ExecStart=/usr/bin/snapper -c home cleanup timeline
