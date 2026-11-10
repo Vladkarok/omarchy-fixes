@@ -44,7 +44,6 @@ grok-bot
 omazed                      # Zed theme sync, writes ~/.config/omarchy/hooks/theme-set
 owe-lockfeed                # OWE wallpaper engine lock feed, pulls in owe
 voxtype-bin                 # dictation, see hardware/voxtype/
-walker                      # Omarchy 3 launcher, probably unused on 4.x
 quickshell-debug            # debug build of the shell, for crash reports
 
 # Gaming and Wine
@@ -135,3 +134,9 @@ wl-clip-persist
 xorg-xrdb
 xorg-xsetroot
 xsettingsd
+
+# Probably removable: nothing on this machine uses it (checked 2026-11).
+#   walker   Omarchy 3 launcher; on 4.x SUPER + SPACE opens the shell's own
+#            menu. The upgrade to 4.x removed omarchy-walker and elephant (its
+#            backend) but left this, and nothing launches it
+#     sudo pacman -Rns walker

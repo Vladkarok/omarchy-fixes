@@ -17,6 +17,14 @@ vmware-govc-bin             # vSphere CLI
 xclicker                    # autoclicker, has a window rule in hypr/windows.lua
 looking-glass               # see hardware/looking-glass/; the client in use is a local B7-758 build
 looking-glass-module-dkms   # kvmfr kernel module for Looking Glass
-wvkbd                       # older on-screen keyboard, probably unneeded now that OSKar is in use
-lib32-sdl2-compat           # installed explicitly, purpose not recorded (32-bit game runtime?)
-libjpeg6-turbo              # installed explicitly, purpose not recorded (old binary app or Wine game?)
+libjpeg6-turbo              # libjpeg.so.62 for Viber's bundled libtiff.so.5 (TIFF image plugin); not a declared dependency
+
+# Probably removable: nothing on this machine uses them (checked 2026-11).
+# They are commented out, so the install command above skips them.
+#   wvkbd               old on-screen keyboard; OSKar replaced it, no binding,
+#                       unit or plugin starts it any more
+#     sudo pacman -Rns wvkbd
+#   lib32-sdl2-compat   installed 2025-10 while debugging 32-bit Wine on
+#                       Wayland; Wine is WoW64 now, Last War is 64-bit, and
+#                       nothing depends on it (also removes lib32-sdl3)
+#     sudo pacman -Rns lib32-sdl2-compat
