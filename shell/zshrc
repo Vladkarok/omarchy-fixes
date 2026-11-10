@@ -37,8 +37,8 @@ bindkey -M menuselect '^[[Z' reverse-menu-complete  # Shift+Tab to go back
 
 # --- Plugins ------------------------------------------------------------
 source ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
-# zsh-syntax-highlighting must be sourced last among plugins
-source ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+# fast-syntax-highlighting must be sourced last among plugins
+source ~/.oh-my-zsh/custom/plugins/fast-syntax-highlighting/fast-syntax-highlighting.plugin.zsh
 
 # --- Tools --------------------------------------------------------------
 eval "$(zoxide init zsh)"
@@ -48,7 +48,7 @@ source <(fzf --zsh)
 eval "$(fnm env --use-on-cd --shell zsh)"
 
 # --- Aliases ------------------------------------------------------------
-source "$HOME/.zsh_aliases"
+[[ -n $CLAUDECODE ]] || source "$HOME/.zsh_aliases"  # agents get real cat/ls
 
 # --- Misc ---------------------------------------------------------------
 [[ -e "/home/vladkarok/lib/oracle-cli/lib/python3.13/site-packages/oci_cli/bin/oci_autocomplete.sh" ]] && \
@@ -64,14 +64,19 @@ bindkey '^E' end-of-line
 # --- Prompt (keep last) -------------------------------------------------
 source ~/.oh-my-zsh/custom/themes/powerlevel10k/powerlevel10k.zsh-theme
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
-export PATH="$PATH:$HOME/.dual-graph"
+
+
+# >>> agterm agent-status >>>
+source '/home/vladkarok/.config/agterm/agent-status/shell/integration.sh'
+# <<< agterm agent-status <<<
+
+# Added by LM Studio CLI (lms)
+export PATH="$PATH:/home/vladkarok/.lmstudio/bin"
+# End of LM Studio CLI section
+
 
 # >>> grok installer >>>
 export PATH="$HOME/.grok/bin:$PATH"
 fpath=(~/.grok/completions/zsh $fpath)
 autoload -Uz compinit && compinit -C
 # <<< grok installer <<<
-
-# >>> agterm agent-status >>>
-source '/home/vladkarok/.config/agterm/agent-status/shell/integration.sh'
-# <<< agterm agent-status <<<
