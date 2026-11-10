@@ -1,0 +1,8 @@
+
+# Looking Glass KVMFR device access.
+# Keep the standard QEMU devices and add /dev/kvmfr0.
+cgroup_device_acl = [
+    "/dev/null", "/dev/full", "/dev/zero",
+    "/dev/random", "/dev/urandom", "/dev/ptmx", "/dev/userfaultfd",
+    "/dev/kvmfr0"
+]

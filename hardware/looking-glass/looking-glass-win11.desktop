@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Windows 11 (Looking Glass)
+Comment=Open the Windows 11 VM through Looking Glass
+Exec=/home/vladkarok/.local/bin/looking-glass-win11
+Icon=looking-glass
+Terminal=false
+Categories=System;Emulator;
+StartupNotify=true

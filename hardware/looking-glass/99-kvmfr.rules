@@ -1,0 +1,2 @@
+# Allow libvirt QEMU and the desktop Looking Glass client to use KVMFR
+SUBSYSTEM=="kvmfr", GROUP="kvm", MODE="0660"

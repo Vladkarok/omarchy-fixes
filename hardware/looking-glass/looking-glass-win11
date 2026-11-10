@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec "$HOME/.local/bin/looking-glass-client-b7-758" \
+  -f /dev/kvmfr0 \
+  -m KEY_F12 \
+  input:autoCapture=yes \
+  input:rawMouse=yes \
+  spice:usbAudio=no \
+  'win:title=Windows 11 (Looking Glass)' \
+  "$@"
