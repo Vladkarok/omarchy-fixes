@@ -82,8 +82,14 @@ Personal Hyprland overrides with no Omarchy equivalent. Copy them to
 `~/.config/hypr/`. `hyprland.lua` loads Omarchy's defaults first and these files
 after, so they win.
 
-- `hyprland.lua`: the `require` order. It also loads `hypr.monitors` and
-  `hypr.input`, which are not in this repo (see "Not captured yet").
+- `hyprland.lua`: the `require` order. It also loads `hypr.input` (below) and
+  `hypr.monitors` (in `hardware/hypr/`, because it is specific to this panel).
+- `input.lua`: `us,ua` layouts toggled with Alt+Shift, Compose on Caps Lock,
+  flat mouse acceleration at sensitivity -0.3. The comments explain why the
+  toggle must not move to Caps Lock (it broke switching in fcitx5 apps).
+- `hyprsunset.conf`: Omarchy's identity profile with `time = 40:00` instead of
+  `07:00`. No clock reaches 40:00, so the profile never fires on its own and
+  the night light stays as the panel left it.
 - `envs.lua`: `LIBVA_DRIVER_NAME=iHD` (Omarchy's `nvidia.lua` forces `nvidia`,
   which breaks video decode in Chromium apps on this hybrid laptop),
   `SDL_VIDEODRIVER=wayland`, `OMASNAP_NOTIFY=0`, the screenshot directory.
@@ -104,7 +110,7 @@ after, so they win.
   after another so they land in the same group.
 
 ```bash
-cp hypr/*.lua ~/.config/hypr/
+cp hypr/*.lua hypr/hyprsunset.conf ~/.config/hypr/
 hyprctl reload && hyprctl configerrors
 ```
 
@@ -256,34 +262,252 @@ Omarchy's own `omarchy-agent-usage-update` now writes `grok.json` and
 records. Disable a local timer once the packaged collector covers what you
 need.
 
+A second Z.ai account (`omarchy-agent-usage-zai-second.{service,timer}` on
+this machine) is not copied: `omarchy-zai-account add second` followed by
+`omarchy-zai-account attach second` generates both units.
+
+### `omarchy/shell/` and `omarchy/themes/neutral-dark/`
+
+The Omarchy shell's own settings and a custom theme.
+
+| File | Goes to |
+| --- | --- |
+| `omarchy/shell/shell.json` | `~/.config/omarchy/shell.json` (mode 0600, as the shell writes it) |
+| `omarchy/shell/shell.toml` | `~/.config/omarchy/shell.toml` |
+| `omarchy/themes/neutral-dark/*` | `~/.config/omarchy/themes/neutral-dark/` |
+
+- `shell.json`: the bar layout (world clocks, keyboard layout, weather,
+  WireGuard, radio, omabump, OSKar, agents, activity monitor), the built-in lock
+  screen disabled in favour of Lock Explorer, and idle timings (`idle.lock`
+  300 s, `idle.screensaver` 150 s). The clock's `birthYear` is removed from
+  this copy; set it again if you want the life-progress view. The plugin
+  entries only work once the plugins are installed (below).
+- `shell.toml`: shell font base size 11.
+- `neutral-dark`: grey surfaces with equal RGB channels, hue-correct ANSI
+  colours, `Yaru-dark` icons (part of the Remmina tray fix) and the GitHub Dark
+  VS Code theme. The three wallpapers in its `backgrounds/` are not in the repo;
+  add your own images there.
+
+Install the third-party plugins before restoring `shell.json`:
+
+```bash
+omarchy plugin add https://github.com/AksharP5/omarchy-radio-atlas.git --yes
+omarchy plugin add https://github.com/glafeara/omarchy-wireguard.git --yes
+omarchy plugin add https://github.com/SirJul1337/omarchy-lock-explorer.git --yes
+omarchy plugin add https://github.com/stappmus/omarchy-activity-monitor.git --yes
+```
+
+The owner's own plugins are linked from clones rather than installed:
+`~/.config/omarchy/plugins/io.github.vladkarok.omabump` →
+[Vladkarok/omabump](https://github.com/Vladkarok/omabump) and
+`io.github.vladkarok.oskar` → [Vladkarok/oskar](https://github.com/Vladkarok/oskar)
+(see "Other repositories").
+
+Then restore the files and pick the theme:
+
+```bash
+install -Dm600 omarchy/shell/shell.json ~/.config/omarchy/shell.json
+install -Dm644 omarchy/shell/shell.toml ~/.config/omarchy/shell.toml
+mkdir -p ~/.config/omarchy/themes/neutral-dark/backgrounds
+cp omarchy/themes/neutral-dark/* ~/.config/omarchy/themes/neutral-dark/
+```
+
+The other hooks under `~/.config/omarchy/hooks` come from packages and need no
+copy: `theme-set` is written by `omazed`, `theme-set.d/10-owe-sync` is
+`/usr/share/owe/10-owe-sync` from `owe`, and `post-update.d/setup-agent.hook`
+is Omarchy's. The `pacman/` and `anydesk/` hooks are covered above.
+
+### `applications/`
+
+Desktop entry overrides and small launchers for `~/.local/share/applications/`.
+Install the app first; an override for an app that is not installed is just a
+broken menu entry.
+
+| File | What it changes |
+| --- | --- |
+| `discord.desktop` | `--ozone-platform=x11`, so Discord's push-to-talk recorder sees keys (see `environment.d/`) |
+| `ChatGPT-Second.desktop` | a second ChatGPT/Codex instance with its own `CODEX_HOME` (`~/.codex-second`) and user data dir (`~/.config/Codex-second`) |
+| `com.teamviewer.TeamViewer.desktop` | unsets `__GLX_VENDOR_LIBRARY_NAME`, so TeamViewer does not start on the NVIDIA GLX vendor |
+| `com.uploadedlobster.peek.desktop` | Peek on X11 (`GDK_BACKEND=x11`), with D-Bus activation off so the override is used |
+| `webcam-preview.desktop` | "Webcam" entry: an mpv preview of `/dev/video0` before a call |
+| `LastWar.desktop` | starts Last War through `~/Work/lwupdate/lastwar-launch-auto.sh` from the private [Vladkarok/lwupdate](https://github.com/Vladkarok/lwupdate) repo; the icon comes from the game's Proton prefix |
+
+The entries use absolute paths under `/home/vladkarok`. With another user
+name, rewrite them while copying:
+
+```bash
+for f in applications/*.desktop; do
+  sed "s|/home/vladkarok|$HOME|g" "$f" > ~/.local/share/applications/"${f##*/}"
+done
+update-desktop-database ~/.local/share/applications
+```
+
+### `etc/`
+
+System files, mirroring their path under `/etc`. Need sudo.
+
+- `etc/sysctl.d/40-disable-ipv6.conf`: turns IPv6 off. The home network has no
+  working IPv6, and dead AAAA routes made Wine and Proton apps (the Last War
+  launcher) stall on IPv6 connects. Drop it on a network with real IPv6.
+
+```bash
+sudo install -Dm644 etc/sysctl.d/40-disable-ipv6.conf /etc/sysctl.d/40-disable-ipv6.conf
+sudo sysctl --system
+```
+
+### `hardware/`: specific to this laptop
+
+Everything here depends on this machine's hardware (hybrid Intel/NVIDIA,
+2560x1600 panel, Intel Wi-Fi, a Windows 11 VM with the dGPU passed through).
+On other hardware, read each file and adjust it or skip it.
+
+#### `hardware/hypr/monitors.lua`
+
+Scale 2 for every monitor without a panel choice. Copy to
+`~/.config/hypr/monitors.lua`. Change `omarchy_monitor_scale` for another
+panel, or leave Omarchy's default and set the scale from the monitor panel.
+
+#### `hardware/voxtype/gpu.conf`
+
+Drop-in for the voxtype user service that pins Vulkan and GPU device index 1
+(`VOXTYPE_VULKAN_DEVICE=1`, `VOXTYPE_GPU_DEVICE=1`). The index depends on the
+GPU order; check it with `vulkaninfo --summary`.
+
+```bash
+voxtype setup systemd     # writes ~/.config/systemd/user/voxtype.service
+install -Dm644 hardware/voxtype/gpu.conf ~/.config/systemd/user/voxtype.service.d/gpu.conf
+systemctl --user daemon-reload && systemctl --user restart voxtype
+```
+
+#### `hardware/wifi/70-wifi-powersave-off.rules`
+
+udev rule that runs `iw ... set power_save off` on every new `wlan*`
+interface. Omarchy 4 now ships the same setting through NetworkManager
+(`/etc/NetworkManager/conf.d/omarchy-wifi-powersave.conf`), so this is a
+fallback. Needs sudo.
+
+```bash
+sudo install -Dm644 hardware/wifi/70-wifi-powersave-off.rules /etc/udev/rules.d/70-wifi-powersave-off.rules
+sudo udevadm control --reload
+```
+
+#### `hardware/looking-glass/`
+
+Looking Glass into the Windows 11 libvirt VM through the kvmfr shared-memory
+device. Install `looking-glass` and `looking-glass-module-dkms` from the AUR
+first (see `aur-packages.txt`).
+
+| File | Goes to | sudo |
+| --- | --- | --- |
+| `kvmfr-modprobe.conf` | `/etc/modprobe.d/kvmfr.conf` (`static_size_mb=64`) | yes |
+| `kvmfr-modules-load.conf` | `/etc/modules-load.d/kvmfr.conf` (load kvmfr at boot) | yes |
+| `99-kvmfr.rules` | `/etc/udev/rules.d/99-kvmfr.rules` (`/dev/kvmfr0` to group `kvm`, mode 0660) | yes |
+| `qemu.conf.snippet` | append to `/etc/libvirt/qemu.conf` (adds `/dev/kvmfr0` to `cgroup_device_acl`) | yes |
+| `vfio.conf.disabled` | `/etc/modprobe.d/vfio.conf.disabled`, kept off; rename to `.conf` to bind the dGPU (`10de:28e0`) and its audio (`10de:22be`) to vfio-pci at boot | yes |
+| `looking-glass-win11` | `~/.local/bin/` (client on `/dev/kvmfr0`, F12 as the escape key, raw mouse, auto-capture) | no |
+| `looking-glass-win11.desktop` | `~/.local/share/applications/` | no |
+| `looking-glass-client.desktop` | `~/.local/share/applications/` (hides the AUR client's entry) | no |
+
+The AUR client (B7-8) does not talk to the host version in the VM, which is
+why its entry is hidden. `looking-glass-win11` runs a client built from
+source at `B7-758-90c898f9`, saved as `~/.local/bin/looking-glass-client-b7-758`;
+the binary is not in this repo. Build the client from the
+[Looking Glass repo](https://github.com/gnif/LookingGlass) at the commit that
+matches the host installed in Windows.
+
+The user must be in the `kvm` and `libvirt` groups. The VM definition
+(`/etc/libvirt/qemu/win11.xml`) is root-only and not captured; it needs the
+kvmfr device in its QEMU command line and is specific to this VM.
+
+```bash
+sudo install -Dm644 hardware/looking-glass/kvmfr-modprobe.conf /etc/modprobe.d/kvmfr.conf
+sudo install -Dm644 hardware/looking-glass/kvmfr-modules-load.conf /etc/modules-load.d/kvmfr.conf
+sudo install -Dm644 hardware/looking-glass/99-kvmfr.rules /etc/udev/rules.d/99-kvmfr.rules
+sudo tee -a /etc/libvirt/qemu.conf < hardware/looking-glass/qemu.conf.snippet >/dev/null
+install -Dm755 hardware/looking-glass/looking-glass-win11 ~/.local/bin/looking-glass-win11
+for f in hardware/looking-glass/*.desktop; do
+  sed "s|/home/vladkarok|$HOME|g" "$f" > ~/.local/share/applications/"${f##*/}"
+done
+sudo modprobe kvmfr && sudo systemctl restart libvirtd
+```
+
+### `aur-packages.txt` and `repo-packages.txt`
+
+Package lists for a fresh install. `aur-packages.txt` is `pacman -Qm` without
+the packages that only come in as dependencies. `repo-packages.txt` is the
+explicitly installed repo packages that are not in Omarchy's own package
+lists, grouped, with notes on the less obvious ones. Both have the install
+command in their header. Read them before installing: a few entries are marked
+as probably unneeded.
+
+### Other repositories
+
+These live elsewhere and are referenced, not copied:
+
+- [Vladkarok/lwupdate](https://github.com/Vladkarok/lwupdate) (private): the
+  Last War launcher, installer and update scripts. `applications/LastWar.desktop`
+  expects it at `~/Work/lwupdate`. The older `~/.local/bin/lastwar-launch` and
+  `lastwar-install` are superseded by it.
+- [Vladkarok/omasnap](https://github.com/Vladkarok/omasnap), branch `patched`:
+  the patched omasnap. Build it and put the binary in `~/.local/bin/omasnap`,
+  where it shadows the packaged `omasnap`.
+- [Vladkarok/wine-thumbs](https://github.com/Vladkarok/wine-thumbs): the Wine
+  patches.
+- [Vladkarok/oskar](https://github.com/Vladkarok/oskar): the on-screen
+  keyboard. `omarchy plugin add https://github.com/Vladkarok/oskar --enable`
+  installs the plugin (this machine links a development clone instead), and
+  the repo's `install.sh` installs the daemon to `~/.local/libexec/oskar-daemon`
+  and writes and enables `~/.config/systemd/user/oskar.service`. Nothing of it
+  is copied here. `oskar-seat-watch.service`, also enabled here, is a
+  diagnostic that runs a script from the clone's `.scratch/` directory; it is
+  not part of the install and is left out.
+- [Vladkarok/omabump](https://github.com/Vladkarok/omabump): the update-check
+  bar plugin. Clone it and link it to
+  `~/.config/omarchy/plugins/io.github.vladkarok.omabump`.
+
 ## Restore checklist for a fresh Omarchy 4.x machine
 
 1. Install Omarchy 4.x and finish its first-run setup. Clone this repo.
-2. Keyboard and display, by hand until they are captured here: in
-   `~/.config/hypr/input.lua` set `kb_layout = "us,ua"` and
-   `kb_options = "shift:both_capslock_cancel,grp:caps_toggle"` (Caps Lock
-   switches layout); in `~/.config/hypr/monitors.lua` set `GDK_SCALE = 2` and
-   monitor `scale = 2`. Add the `$LAYOUT[EN,UA]` label to `hyprlock.conf` so the
-   lock screen shows the active layout.
-3. Copy `hypr/*.lua` to `~/.config/hypr/` and run `hyprctl reload`.
+2. Install the packages: `repo-packages.txt` with pacman, then
+   `aur-packages.txt` with yay. Skim both first and drop what you no longer
+   use.
+3. Hyprland: copy `hypr/*.lua` and `hypr/hyprsunset.conf` to
+   `~/.config/hypr/`, then `hardware/hypr/monitors.lua` (adjust the scale on
+   other hardware). Run `hyprctl reload && hyprctl configerrors`.
 4. Copy the terminal configs, `environment.d/electron-wayland.conf`,
    `pacman/makepkg.conf` and the shell files. Install the zsh plugins and theme.
 5. Build `hyprland/` and `remmina/` with makepkg, run
    `pacman/local-patched-repo/install.sh`, then `omarchy update`. Log out and
    back in.
-6. Install the desktop overrides (`claude/`, `viber/`, `remmina/`, `agterm/`)
-   and `chatgpt/codex-flags.conf`, after the apps themselves. Install the
-   AnyDesk hook after AnyDesk.
-7. Copy `mise/global-config.toml` to `~/.config/mise/config.toml`, remove the
-   pacman `herdr`, and run `mise install`.
-8. Set up snapper for `/home` (`snapper/`).
-9. Optional: the `omarchy/` collectors and brightness fork. Put the Z.ai key in
-   `~/.config/omarchy/agents/zai.json` (mode 0600) and log in to Grok and ZCode
-   before enabling the timers.
-10. Things to check rather than copy:
+6. System files (sudo): `etc/sysctl.d/40-disable-ipv6.conf` if the network
+   still has no working IPv6, and on this laptop
+   `hardware/wifi/70-wifi-powersave-off.rules`.
+7. Omarchy shell: add the four third-party plugins, set up OSKar and omabump
+   from their repos, then restore `omarchy/shell/` and the `neutral-dark`
+   theme and select it. Add wallpapers to the theme's `backgrounds/`.
+8. Desktop overrides, after the apps themselves: `claude/`, `viber/`,
+   `remmina/`, `agterm/`, `applications/`, and `chatgpt/codex-flags.conf`.
+   Install the AnyDesk hook after AnyDesk.
+9. Dictation: run `voxtype setup systemd`, then add
+   `hardware/voxtype/gpu.conf` (check the GPU index).
+10. Copy `mise/global-config.toml` to `~/.config/mise/config.toml`, remove the
+    pacman `herdr`, and run `mise install`.
+11. Set up snapper for `/home` (`snapper/`).
+12. Projects from other repositories: clone `lwupdate` to `~/Work/lwupdate`
+    for Last War, build the `omasnap` fork into `~/.local/bin/omasnap`, and
+    apply the `wine-thumbs` patches if needed.
+13. Optional, this laptop only: Looking Glass and the Windows VM
+    (`hardware/looking-glass/`). Build the matching client, define the VM, and
+    join the `kvm` and `libvirt` groups.
+14. Optional: the `omarchy/` collectors and brightness fork. Put the Z.ai key in
+    `~/.config/omarchy/agents/zai.json` (mode 0600) and log in to Grok and ZCode
+    before enabling the timers. For the second Z.ai account run
+    `omarchy-zai-account add second` and `omarchy-zai-account attach second`.
+15. Things to check rather than copy:
     - Idle and lock timings live in `~/.config/omarchy/shell.json`
-      (`idle.lock`, `idle.screensaver`); `hypridle` is not running, so
-      `hypridle.conf` has no effect.
+      (`idle.lock`, `idle.screensaver`). `hypridle` and `hyprlock` are not
+      installed on Omarchy 4, so their old config files have no effect; the
+      lock screen is the Lock Explorer plugin.
     - fcitx5 broke Ctrl+C and Ctrl+V in the UA layout system-wide. If Omarchy
       installs it again, expect that back.
     - `omarchy-refresh-limine` replaces `/boot/limine.conf`. Re-add
@@ -293,36 +517,66 @@ need.
       keyring; store them base64-encoded on one line. If the keyring is ever
       broken, fix it before opening a Chromium browser, which deletes cookies it
       cannot decrypt.
-    - Take Omarchy's versions of git, tmux, fastfetch, btop, swayosd and
-      hyprsunset config; the old copies were only stale defaults.
+    - Take Omarchy's versions of git, tmux, fastfetch, btop and swayosd
+      config; the old copies were only stale defaults.
     - Known unsolved: after resume the NumLock LED reads on but the numpad types
       nothing until NumLock is toggled twice (hyprlock #680).
 
+## Checked and left out
+
+These exist on the machine but come from Omarchy, a package, or another
+installer, so a fresh install recreates them:
+
+- `/etc/modprobe.d/nvidia.conf` (`nvidia_drm modeset=1`): Omarchy's
+  `install/hardware/nvidia.sh`.
+- `/etc/modprobe.d/hid_apple.conf` (`fnmode=2`): Omarchy's `fix-fkeys.sh`.
+- `/etc/modprobe.d/disable-usb-autosuspend.conf`: Omarchy's old
+  `usb-autosuspend.sh`; the package now ships `omarchy-usb-autosuspend.conf`
+  with the same option.
+- `/etc/sysctl.d/99-sysctl.conf` (`tcp_mtu_probing=1`): Omarchy's old
+  `ssh-flakiness.sh`; now in the packaged `99-omarchy-sysctl.conf`.
+- `/etc/systemd/system/user@.service.d/faster-shutdown.conf`: identical to
+  Omarchy's default, which the package now ships as `10-faster-shutdown.conf`.
+- `~/.config/environment.d/omarchy-firefox-wayland.conf`: written by
+  `omarchy-install-browser`.
+- `~/.config/hypr/hypridle.conf`, `hyprlock.conf`: left over from Omarchy 3;
+  neither program is installed on 4.x.
+- `~/.config/systemd/user/voxtype.service`: written by `voxtype setup systemd`.
+- `omarchy-agent-usage-zai-second.{service,timer}`: generated by
+  `omarchy-zai-account attach second`.
+- `~/.local/share/applications/anydesk.desktop`: written by the AnyDesk hook in
+  `anydesk/`. `typora.desktop`, `windows-vm.desktop`, `battlenet.desktop`,
+  `Docker.desktop`, the web apps and the 28-byte hidden entries: written by
+  Omarchy. `xclicker.desktop`: identical to the package's. The T3 Code and
+  GeForce NOW entries: written by those apps' installers.
+- `~/.local/bin/kimi`, `playwright-cli`: wrappers generated by
+  `omarchy-mise-install`. `anydesk-100scale`: written by the AnyDesk hook.
+  `env`, `env.fish`, `uv`, `uvx`: the uv installer. `agterm`, `markitdown`,
+  `UnityPy`, `t3`, `revmux`: links to other installs.
+- `~/.config/omarchy/hooks/theme-set`, `theme-set.d/10-owe-sync`,
+  `post-update.d/setup-agent.hook`: see `omarchy/shell/` above.
+
 ## Not captured yet
 
-These are live on the machine but have no copy here:
-
-- `~/.config/hypr/input.lua`, `monitors.lua`, `hypridle.conf`, `hyprlock.conf`,
-  `hyprsunset.conf`
-- `omarchy-agent-usage-zai-second.{service,timer}` (generated by
-  `omarchy-zai-account attach second`)
-- `/etc/sysctl.d/40-disable-ipv6.conf`, `/etc/sysctl.d/99-sysctl.conf`,
-  `/etc/udev/rules.d/70-wifi-powersave-off.rules`,
-  `/etc/systemd/system/user@.service.d/faster-shutdown.conf`
-- Looking Glass and VFIO setup (kvmfr modprobe and udev rules, launcher scripts)
-- `/etc/modprobe.d/disable-usb-autosuspend.conf`, `nvidia.conf`,
-  `hid_apple.conf` (check whether Omarchy writes them)
-- `~/.config/systemd/user/voxtype.service.d/gpu.conf`
-- OSKar user units (`oskar.service`, `oskar-seat-watch.service`)
-- The local `~/.local/bin/omasnap` build
-- Desktop overrides: `discord.desktop`, `LastWar.desktop`,
-  `ChatGPT-Second.desktop`, `anydesk.desktop`
-- Personal scripts in `~/.local/bin` (Last War launcher and installer, RDP and
-  recording helpers)
-- Omarchy shell state: `shell.json`, `shell.toml`, the `neutral-dark` theme,
-  `hooks/theme-set.d/10-owe-sync`, and the list of installed shell plugins
-- A package list (repo and AUR packages)
-- `~/.config/environment.d/omarchy-firefox-wayland.conf` (may come from Omarchy)
+- `~/.config/omarchy/agents/` (including `zai.json`): API keys. Never commit;
+  recreate with `omarchy-zai-account add <label>` and the agents' own logins.
+- The `xfreerdp3` shortcut script in `~/.local/bin` for a work machine. It
+  holds a private host and user name, so it stays out. The settings worth
+  keeping are `+dynamic-resolution /scale:140 /gfx:AVC444 /bpp:32 /cert:tofu
+  +auto-reconnect +floatbar`. It is rarely used; decide whether to recreate it
+  with a placeholder host or drop it.
+- `~/.local/bin/looking-glass-client-b7-758`: a binary; build it as described
+  under `hardware/looking-glass/`.
+- `/etc/libvirt/qemu/win11.xml`: root-only and specific to this VM.
+- The `neutral-dark` wallpapers (about 4.7 MB of images).
+- `oskar-seat-watch.service`: a development diagnostic pointing into the
+  OSKar clone's `.scratch/` directory. Owner's call whether it is still needed.
+- `~/.local/bin/record-all-screens`, `xclicker-wrapper`, `opencode-npx`: no
+  keybinding, desktop entry, unit or recent shell use refers to them. Owner's
+  call whether they are still wanted. `whatsapp-linux-desktop` points at a
+  removed app; ZapZap replaced it.
+- `~/.local/share/applications/omamail.desktop`: points at an omamail plugin
+  that is no longer installed. Delete it, or reinstall the plugin.
 
 ## License
 
