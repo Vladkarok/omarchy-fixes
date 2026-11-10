@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Webcam
+GenericName=Camera preview
+Comment=Live preview of the webcam before a call
+Exec=mpv av://v4l2:/dev/video0 --profile=low-latency --untimed --title=Webcam --no-osc
+Icon=camera-web
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=webcam;camera;cam;video;v4l2;preview;
+StartupNotify=false

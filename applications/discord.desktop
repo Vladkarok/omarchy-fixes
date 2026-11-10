@@ -1,0 +1,16 @@
+[Desktop Entry]
+Name=Discord
+StartupWMClass=discord
+Comment=All-in-one voice and text chat for gamers that's free, secure, and works on both your desktop and phone.
+GenericName=Internet Messenger
+# XWayland, not native Wayland: Discord's keybind recorder (push-to-talk
+# "Register Keybind") only listens for X11 key events, so on
+# --ozone-platform=wayland it detects no keys at all. The explicit x11 flag
+# also overrides the global ELECTRON_OZONE_PLATFORM_HINT=wayland from
+# ~/.config/environment.d/electron-wayland.conf.
+Exec=/usr/bin/discord --ozone-platform=x11
+Icon=discord
+Type=Application
+Categories=Network;InstantMessaging;
+Path=/usr/bin
+Terminal=false

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=LastWar
+Comment=Launch LastWar through Proton
+Type=Application
+Exec=/home/vladkarok/Work/lwupdate/lastwar-launch-auto.sh
+Terminal=false
+Categories=Game;
+Icon=/home/vladkarok/Games/compatdata/thelastwar/pfx/drive_c/users/steamuser/AppData/Local/FunFly/TheLastWar.png

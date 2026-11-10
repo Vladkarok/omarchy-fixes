@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Name=ChatGPT (Second Account)
+Comment=ChatGPT desktop app using the second Codex account
+Exec=env CODEX_HOME=/home/vladkarok/.codex-second CODEX_ELECTRON_USER_DATA_PATH=/home/vladkarok/.config/Codex-second chatgpt --user-data-dir=/home/vladkarok/.config/Codex-second %U
+Icon=chatgpt
+Terminal=false
+Type=Application
+Categories=Development;
+StartupNotify=true
+StartupWMClass=Chatgpt
