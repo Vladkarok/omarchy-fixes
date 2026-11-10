@@ -317,6 +317,28 @@ copy: `theme-set` is written by `omazed`, `theme-set.d/10-owe-sync` is
 `/usr/share/owe/10-owe-sync` from `owe`, and `post-update.d/setup-agent.hook`
 is Omarchy's. The `pacman/` and `anydesk/` hooks are covered above.
 
+### `local-bin/`
+
+Small scripts for `~/.local/bin` that are not tied to Omarchy or to this
+laptop's hardware.
+
+| File | What it does |
+| --- | --- |
+| `rdp-connect` | `xfreerdp3` to one Windows machine with the client flags that work here: `+dynamic-resolution /scale:140 /gfx:AVC444 /bpp:32 /cert:tofu +auto-reconnect +floatbar`. Extra arguments are passed through (`rdp-connect /f`). |
+| `rdp-connect.env.example` | template for `~/.config/rdp-connect.env`: `RDP_HOST`, `RDP_USER`, optional `RDP_DOMAIN` and `RDP_SCALE`. No password; xfreerdp3 asks for it. |
+| `opencode-npx` | runs the newest `opencode-ai` from npm through `mise exec node@latest -- npx`, next to the mise-managed `opencode`, for trying a release before mise has it. |
+| `xclicker-wrapper` | starts xclicker from a login shell so it gets the full login environment. The package's desktop entry runs `xclicker` directly and works too, so this is optional. |
+
+```bash
+for f in rdp-connect opencode-npx xclicker-wrapper; do install -Dm755 local-bin/$f ~/.local/bin/$f; done
+install -Dm600 local-bin/rdp-connect.env.example ~/.config/rdp-connect.env   # then fill it in
+```
+
+Variables already in the environment win over the file, and
+`RDP_CONNECT_ENV=/path/to/other.env rdp-connect` picks another machine. The
+owner's own copy of the script, with the real host and user written in, stays
+out of the repo.
+
 ### `applications/`
 
 Desktop entry overrides and small launchers for `~/.local/share/applications/`.
@@ -407,6 +429,7 @@ first (see `aur-packages.txt`).
 | `looking-glass-win11` | `~/.local/bin/` (client on `/dev/kvmfr0`, F12 as the escape key, raw mouse, auto-capture) | no |
 | `looking-glass-win11.desktop` | `~/.local/share/applications/` | no |
 | `looking-glass-client.desktop` | `~/.local/share/applications/` (hides the AUR client's entry) | no |
+| `win11.xml` | `virsh define` after filling the placeholders (below) | no |
 
 The AUR client (B7-8) does not talk to the host version in the VM, which is
 why its entry is hidden. `looking-glass-win11` runs a client built from
@@ -415,9 +438,37 @@ the binary is not in this repo. Build the client from the
 [Looking Glass repo](https://github.com/gnif/LookingGlass) at the commit that
 matches the host installed in Windows.
 
-The user must be in the `kvm` and `libvirt` groups. The VM definition
-(`/etc/libvirt/qemu/win11.xml`) is root-only and not captured; it needs the
-kvmfr device in its QEMU command line and is specific to this VM.
+The user must be in the `kvm` and `libvirt` groups.
+
+`win11.xml` is the VM definition (`virsh dumpxml --inactive win11`), scrubbed:
+q35 with Secure Boot OVMF and an emulated TPM, host-passthrough CPU as 1 socket
+x 4 cores x 2 threads, 12 GiB RAM, the Hyper-V enlightenments (custom mode,
+including `evmcs` and `avic`), a virtio disk at
+`/var/lib/libvirt/images/win11.qcow2`, and two NICs (libvirt's `default` and a
+host-only `vm-local` network, which is not in this repo). Fill these
+placeholders before `virsh -c qemu:///system define hardware/looking-glass/win11.xml`:
+
+| Placeholder | Fill with |
+| --- | --- |
+| `@DOMAIN_UUID@` | a UUID (`uuidgen`), or delete the `<uuid>` line |
+| `@MAC_DEFAULT_NET@`, `@MAC_VM_LOCAL_NET@` | `52:54:00:xx:xx:xx` MACs, or delete the `<mac>` lines for random ones |
+| `@VIRTIO_WIN_ISO@` | the virtio-win driver ISO, or delete that cdrom `<disk>` |
+
+The definition as it stands has no Looking Glass device, no GPU `<hostdev>`,
+no CPU pinning and no hugepages: the kvmfr module is loaded but the running VM
+does not open `/dev/kvmfr0`. To use Looking Glass again, add
+`xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'` to `<domain>` and
+this block before `</domain>` (64 MiB, matching `static_size_mb=64`), as the
+Looking Glass docs describe:
+
+```xml
+<qemu:commandline>
+  <qemu:arg value='-device'/>
+  <qemu:arg value='{"driver":"ivshmem-plain","id":"shmem0","memdev":"looking-glass"}'/>
+  <qemu:arg value='-object'/>
+  <qemu:arg value='{"qom-type":"memory-backend-file","id":"looking-glass","mem-path":"/dev/kvmfr0","size":67108864,"share":true}'/>
+</qemu:commandline>
+```
 
 ```bash
 sudo install -Dm644 hardware/looking-glass/kvmfr-modprobe.conf /etc/modprobe.d/kvmfr.conf
@@ -437,8 +488,11 @@ Package lists for a fresh install. `aur-packages.txt` is `pacman -Qm` without
 the packages that only come in as dependencies. `repo-packages.txt` is the
 explicitly installed repo packages that are not in Omarchy's own package
 lists, grouped, with notes on the less obvious ones. Both have the install
-command in their header. Read them before installing: a few entries are marked
-as probably unneeded.
+command in their header. Each ends with a commented-out "Probably removable"
+block (`wvkbd`, `lib32-sdl2-compat`, `walker`): nothing on this machine uses
+them, the install command skips them, and the block has the `pacman -Rns` line
+for each. `libjpeg6-turbo` stays: Viber's bundled `libtiff.so.5` needs
+`libjpeg.so.62`, which no declared dependency provides.
 
 ### Other repositories
 
@@ -458,9 +512,7 @@ These live elsewhere and are referenced, not copied:
   installs the plugin (this machine links a development clone instead), and
   the repo's `install.sh` installs the daemon to `~/.local/libexec/oskar-daemon`
   and writes and enables `~/.config/systemd/user/oskar.service`. Nothing of it
-  is copied here. `oskar-seat-watch.service`, also enabled here, is a
-  diagnostic that runs a script from the clone's `.scratch/` directory; it is
-  not part of the install and is left out.
+  is copied here.
 - [Vladkarok/omabump](https://github.com/Vladkarok/omabump): the update-check
   bar plugin. Clone it and link it to
   `~/.config/omarchy/plugins/io.github.vladkarok.omabump`.
@@ -487,7 +539,8 @@ These live elsewhere and are referenced, not copied:
    theme and select it. Add wallpapers to the theme's `backgrounds/`.
 8. Desktop overrides, after the apps themselves: `claude/`, `viber/`,
    `remmina/`, `agterm/`, `applications/`, and `chatgpt/codex-flags.conf`.
-   Install the AnyDesk hook after AnyDesk.
+   Install the AnyDesk hook after AnyDesk. Copy the `local-bin/` scripts and
+   fill in `~/.config/rdp-connect.env`.
 9. Dictation: run `voxtype setup systemd`, then add
    `hardware/voxtype/gpu.conf` (check the GPU index).
 10. Copy `mise/global-config.toml` to `~/.config/mise/config.toml`, remove the
@@ -497,8 +550,9 @@ These live elsewhere and are referenced, not copied:
     for Last War, build the `omasnap` fork into `~/.local/bin/omasnap`, and
     apply the `wine-thumbs` patches if needed.
 13. Optional, this laptop only: Looking Glass and the Windows VM
-    (`hardware/looking-glass/`). Build the matching client, define the VM, and
-    join the `kvm` and `libvirt` groups.
+    (`hardware/looking-glass/`). Build the matching client, fill the
+    placeholders in `win11.xml` and define the VM (add the kvmfr block for
+    Looking Glass), and join the `kvm` and `libvirt` groups.
 14. Optional: the `omarchy/` collectors and brightness fork. Put the Z.ai key in
     `~/.config/omarchy/agents/zai.json` (mode 0600) and log in to Grok and ZCode
     before enabling the timers. For the second Z.ai account run
@@ -556,27 +610,31 @@ installer, so a fresh install recreates them:
 - `~/.config/omarchy/hooks/theme-set`, `theme-set.d/10-owe-sync`,
   `post-update.d/setup-agent.hook`: see `omarchy/shell/` above.
 
+Removed from the machine in 2026-11 (moved to the trash, not captured):
+
+- `oskar-seat-watch.service`: an OSKar development diagnostic that ran a
+  script from the clone's `.scratch/` directory to catch a Hyprland seat bug.
+  The local Hyprland patches in `hyprland/` fix that bug. `oskar.service` did
+  not depend on it.
+- `~/.local/bin/whatsapp-linux-desktop`: a symlink into the removed
+  `/opt/WhatsApp Desktop`; ZapZap replaced it.
+- `~/.local/share/applications/omamail.desktop`: pointed at the omamail plugin,
+  which is no longer installed.
+- `~/.local/bin/record-all-screens`: its start/stop toggle never worked (the
+  script exits right after starting the recorder, so a second run cannot find
+  the first). Omarchy's own screen recording covers region and monitor
+  capture.
+
 ## Not captured yet
 
 - `~/.config/omarchy/agents/` (including `zai.json`): API keys. Never commit;
   recreate with `omarchy-zai-account add <label>` and the agents' own logins.
-- The `xfreerdp3` shortcut script in `~/.local/bin` for a work machine. It
-  holds a private host and user name, so it stays out. The settings worth
-  keeping are `+dynamic-resolution /scale:140 /gfx:AVC444 /bpp:32 /cert:tofu
-  +auto-reconnect +floatbar`. It is rarely used; decide whether to recreate it
-  with a placeholder host or drop it.
 - `~/.local/bin/looking-glass-client-b7-758`: a binary; build it as described
   under `hardware/looking-glass/`.
-- `/etc/libvirt/qemu/win11.xml`: root-only and specific to this VM.
+- The `vm-local` libvirt network that `win11.xml` uses (an isolated network,
+  no forwarding, with its own subnet and DHCP). Recreate it in virt-manager or
+  drop that NIC.
 - The `neutral-dark` wallpapers (about 4.7 MB of images).
-- `oskar-seat-watch.service`: a development diagnostic pointing into the
-  OSKar clone's `.scratch/` directory. Owner's call whether it is still needed.
-- `~/.local/bin/record-all-screens`, `xclicker-wrapper`, `opencode-npx`: no
-  keybinding, desktop entry, unit or recent shell use refers to them. Owner's
-  call whether they are still wanted. `whatsapp-linux-desktop` points at a
-  removed app; ZapZap replaced it.
-- `~/.local/share/applications/omamail.desktop`: points at an omamail plugin
-  that is no longer installed. Delete it, or reinstall the plugin.
 
 ## License
 

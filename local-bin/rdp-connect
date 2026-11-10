@@ -1,0 +1,55 @@
+#!/bin/bash
+# RDP to one Windows machine with xfreerdp3 and the client flags that work on
+# this laptop (HiDPI scale 140, AVC444, auto-reconnect, floatbar).
+#
+# Host and user come from the environment or from a config file outside the
+# repo, by default ~/.config/rdp-connect.env (see rdp-connect.env.example):
+#
+#   RDP_HOST=host.example.lan   # required
+#   RDP_USER=username           # required
+#   RDP_DOMAIN=                 # optional
+#   RDP_SCALE=140               # optional, 100/140/180
+#
+# Variables already set in the environment win over the file. Point
+# RDP_CONNECT_ENV at another file to keep more than one machine. The password
+# is not stored; xfreerdp3 asks for it.
+#
+# xfreerdp3 runs on X11/XWayland and scales on its own; GDK_SCALE and friends
+# would only make the window too small.
+
+set -euo pipefail
+
+config=${RDP_CONNECT_ENV:-${XDG_CONFIG_HOME:-$HOME/.config}/rdp-connect.env}
+
+host=${RDP_HOST:-}
+user=${RDP_USER:-}
+domain=${RDP_DOMAIN:-}
+scale=${RDP_SCALE:-}
+
+if [[ -r $config ]]; then
+  # shellcheck source=/dev/null
+  source "$config"
+  host=${host:-${RDP_HOST:-}}
+  user=${user:-${RDP_USER:-}}
+  domain=${domain:-${RDP_DOMAIN:-}}
+  scale=${scale:-${RDP_SCALE:-}}
+fi
+
+if [[ -z $host || -z $user ]]; then
+  echo "rdp-connect: set RDP_HOST and RDP_USER in $config or the environment" >&2
+  exit 1
+fi
+
+args=(/v:"$host" /u:"$user")
+[[ -n $domain ]] && args+=(/d:"$domain")
+
+exec xfreerdp3 \
+  "${args[@]}" \
+  +dynamic-resolution \
+  /scale:"${scale:-140}" \
+  /gfx:AVC444 \
+  /bpp:32 \
+  /cert:tofu \
+  +auto-reconnect \
+  +floatbar \
+  "$@"
