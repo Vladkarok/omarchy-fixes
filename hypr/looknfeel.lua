@@ -5,6 +5,7 @@ hl.config({
   general = {
     gaps_in = 0,
     gaps_out = 0,
+    border_size = 0,
   },
 })
 
@@ -49,16 +50,12 @@ hl.config({
 -- })
 
 -- https://wiki.hypr.land/Configuring/Basics/Variables/#decoration
--- hl.config({
---   decoration = {
---     -- Use round window corners.
---     rounding = 8,
---
---     -- Dim unfocused windows (0.0 = no dim, 1.0 = fully dimmed).
---     dim_inactive = true,
---     dim_strength = 0.15,
---   },
--- })
+hl.config({
+  decoration = {
+    -- Use round window corners.
+    rounding = 4,
+  },
+})
 
 -- https://wiki.hypr.land/Configuring/Basics/Variables/#animations
 -- hl.config({
@@ -83,6 +80,11 @@ hl.config({
 --     column_width = 0.97,
 --   },
 -- })
+
+-- Opt another application in to Omarchy's standard transparency.
+-- Find its class with: hyprctl clients
+-- o.transparent_window("my-app")
+-- o.transparent_window("my-app", "0.9 0.85") -- Custom active/inactive opacity.
 
 -- Keep the pointer visible. Omarchy hides it on any key press (compositor
 -- binds included) and over Remmina's XWayland window mouse motion does not

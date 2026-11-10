@@ -51,6 +51,14 @@ o.window([[^(emote)$]], { stay_focused = true, center = true })
 o.window({ title = [[^(Last War-Survival Game)$]] }, { workspace = "5 silent", float = false })
 o.window({ class = [[^(steam_proton)$]], title = [[Last War]] }, { workspace = "5 silent", float = false })
 
+-- "no_max_size" is load-bearing since Hyprland 0.57 (2026-10-29). Wine pins the
+-- game window to a fixed size (WM_NORMAL_HINTS min == max), and dwindle floats
+-- any window whose max size is smaller than its tile slot, after "float = false"
+-- has already been applied. 0.56 compared the raw X11 pixels (2560x1552 at
+-- scale 2), so the check never fired; 0.57 divides by the scale (1280x776), so
+-- any launch with a smaller saved size no longer fits the 1280x776 slot.
+o.window({ class = [[^(steam_proton)$]], title = [[^(Last War-Survival Game)$]] }, { no_max_size = true })
+
 -- The vendor launcher (Rust/Iced) maps before the game and respawns while it
 -- runs, so pin it to workspace 5 rather than letting it land on whatever
 -- workspace happens to be focused. Deliberately left floating: tiling it would

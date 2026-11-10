@@ -105,3 +105,17 @@ rebind("SUPER + F12", "Guest shortcut passthrough", hl.dsp.submap("passthrough")
 hl.define_submap("passthrough", function()
   hl.bind("SUPER + F12", hl.dsp.submap("reset"), { description = "Exit guest shortcut passthrough" })
 end)
+
+-- Discord push-to-talk on the backtick key. Discord asks for the shortcut
+-- through the GlobalShortcuts portal, and on Hyprland it fires only once a key
+-- is bound to it here. Hyprland sends global binds both press and release, so
+-- holding the key holds the mic open. By keycode (TLDE = 49) so it works under
+-- the Ukrainian layout too, and non-consuming so ` still types in other apps.
+rebind("code:49", "Discord push-to-talk", hl.dsp.global("discord:discord-push-to-talk"), { non_consuming = true })
+
+-- Dictation keys from before Alt + Space and Right Alt became the defaults.
+-- Remove these lines to give the keys back to applications.
+if o.dictation_installed and o.dictation_installed() then
+  o.bind("SUPER + CTRL + X", "Toggle dictation", "omarchy-dictation toggle")
+  o.bind_hold("F9", "Start dictation (push-to-talk)", "omarchy-dictation start", "Stop dictation (push-to-talk)", "omarchy-dictation stop")
+end
