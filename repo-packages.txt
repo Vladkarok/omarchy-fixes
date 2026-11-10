@@ -1,0 +1,137 @@
+# Packages from the Arch and Omarchy repositories that were installed by hand:
+# `pacman -Qqen` minus Omarchy's install/*.packages lists, minus the base
+# system (linux, linux-headers, intel-ucode, efibootmgr), Omarchy itself and the
+# [local-patched] builds (hyprpm, remmina). Some of these came from Omarchy's
+# own installer menus (terminals, browsers, Steam, Typora) and will already be
+# there; pacman --needed skips them.
+#
+# Install: grep -v '^#' repo-packages.txt | awk '{print $1}' | sudo pacman -S --needed -
+
+# Desktop apps
+audacity
+brave-bin
+celluloid
+claude-desktop              # desktop override in claude/
+cursor-bin
+discord                     # desktop override in applications/
+firefox
+gimp
+gnome-clocks
+kdenlive
+lmstudio-bin
+obs-studio
+openai-codex-desktop        # flags in chatgpt/
+peek                        # desktop override in applications/
+seahorse                    # GNOME keyring editor
+shortwave
+signal-desktop
+spotify
+telegram-desktop
+typora
+xournalpp
+zed
+zen-browser-bin
+
+# Terminals and shells
+alacritty
+fish
+ghostty
+kitty
+zsh                         # shell/
+
+# Omarchy add-ons
+grok-bot
+omazed                      # Zed theme sync, writes ~/.config/omarchy/hooks/theme-set
+owe-lockfeed                # OWE wallpaper engine lock feed, pulls in owe
+voxtype-bin                 # dictation, see hardware/voxtype/
+walker                      # Omarchy 3 launcher, probably unused on 4.x
+quickshell-debug            # debug build of the shell, for crash reports
+
+# Gaming and Wine
+gamescope
+innoextract
+lib32-alsa-plugins
+lib32-libdecor
+lib32-libpulse
+lib32-libxkbcommon
+lib32-mangohud
+lib32-pipewire
+lib32-pipewire-jack
+lib32-vulkan-intel
+mangohud
+protontricks
+steam
+umu-launcher
+waifu2x-ncnn-vulkan
+
+# Virtualisation and remote access
+edk2-ovmf
+gtk-vnc
+libvirt
+libvncserver
+qemu-desktop
+spice-gtk
+swtpm
+virt-manager
+
+# Development
+android-tools
+clang
+devtools
+dotnet-runtime-9.0
+fnm                         # used by shell/zshrc
+git-filter-repo
+github-cli
+glab
+lazydocker
+llvm
+micro
+neovim
+python-pipx
+rust
+terraform
+valkey
+xmlstarlet
+yq
+
+# Network and system tools
+atop
+bind
+cloudflared
+dnsmasq
+fwupd
+htop
+mitmproxy
+mtr
+openresolv
+opensnitch
+python-pywinrm
+reflector
+scrcpy
+sshpass
+supergfxctl                 # hybrid GPU mode switching
+tailscale
+tcpdump
+traceroute
+wireguard-tools
+wireshark-cli
+
+# Desktop plumbing and themes
+ex-vi-compat
+flatpak
+hyprshot
+kvantum-qt5
+kvantum-theme-materia
+libqalculate
+libva-utils
+materia-gtk-theme
+noto-fonts-extra
+papirus-icon-theme
+qt5-wayland
+ttf-cascadia-mono-nerd
+vlc-plugin-ffmpeg
+vlc-plugin-live555
+wl-clip-persist
+xorg-xrdb
+xorg-xsetroot
+xsettingsd

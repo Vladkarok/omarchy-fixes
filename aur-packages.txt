@@ -1,0 +1,22 @@
+# Foreign packages (from `pacman -Qm`) to install with yay after Omarchy.
+# Dependencies that come in on their own are left out: fvs2, patool and
+# vkbasalt-cli are pulled in by bottles.
+#
+# Install: grep -v '^#' aur-packages.txt | awk '{print $1}' | yay -S --needed -
+
+anydesk-bin
+bottles
+emote                       # emoji picker bound in hypr/bindings.lua
+proton-ge-custom-bin        # Proton for Last War (Vladkarok/lwupdate) and other Wine games
+teamviewer
+viber                       # desktop override in viber/
+zapzap                      # WhatsApp client, replaces whatsapp-linux-desktop
+zcode                       # Z.ai ZCode desktop app, SUPER + SHIFT + Z
+winbox                      # MikroTik RouterOS configurator
+vmware-govc-bin             # vSphere CLI
+xclicker                    # autoclicker, has a window rule in hypr/windows.lua
+looking-glass               # see hardware/looking-glass/; the client in use is a local B7-758 build
+looking-glass-module-dkms   # kvmfr kernel module for Looking Glass
+wvkbd                       # older on-screen keyboard, probably unneeded now that OSKar is in use
+lib32-sdl2-compat           # installed explicitly, purpose not recorded (32-bit game runtime?)
+libjpeg6-turbo              # installed explicitly, purpose not recorded (old binary app or Wine game?)
