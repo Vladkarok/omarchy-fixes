@@ -1,0 +1,12 @@
+[Unit]
+Description=Write the Z.ai GLM Coding Plan usage record for the omarchy.agents panel
+Documentation=https://github.com/omacom/omarchy/pull/7566
+
+[Service]
+Type=oneshot
+# Match the 0600 records omarchy-agent-usage-update writes via mktemp.
+UMask=0077
+# omarchy-agent-usage-update only globs $OMARCHY_PATH/bin, which is package-owned,
+# so the collector writes its record straight into the directory the panel watches.
+ExecStart=/bin/sh -c 'exec %h/.local/bin/omarchy-agent-usage-zai > "$${XDG_STATE_HOME:-%h/.local/state}/omarchy/agents/usage/.zai.json.tmp"'
+ExecStartPost=/bin/sh -c 'exec mv "$${XDG_STATE_HOME:-%h/.local/state}/omarchy/agents/usage/.zai.json.tmp" "$${XDG_STATE_HOME:-%h/.local/state}/omarchy/agents/usage/zai.json"'

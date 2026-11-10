@@ -7,7 +7,9 @@
 Local stats come from documented session files under $GROK_HOME (default
 ~/.grok): each updates.jsonl turn_completed event is one prompt. The weekly
 SuperGrok pool and the plan label come from the same cli-chat-proxy endpoints
-Grok's /usage command uses. The agents panel only ever reads the JSON this
+Grok's /usage command uses. Access tokens in auth.json last a few hours;
+this collector refreshes them with the stored refresh_token instead of
+treating expiry as a logout. The agents panel only ever reads the JSON this
 prints.
 """
 
@@ -23,6 +25,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -33,9 +36,12 @@ AUTH_HELP = "Run `grok login` to restore usage limits."
 DEFAULT_PROXY = "https://cli-chat-proxy.grok.com"
 BILLING_PATH = "/v1/billing?format=credits"
 USER_PATH = "/v1/user?include=subscription"
+DEFAULT_ISSUER = "https://auth.x.ai"
+DEFAULT_TOKEN_ENDPOINT = "https://auth.x.ai/oauth2/token"
 SCAN_REUSE_SECONDS = 20
 LIMITS_ONLY_REUSE_SECONDS = 900
 CACHE_SCHEMA = 1
+AUTH_LOCK_WAIT_SECS = 5
 
 
 def grok_home() -> Path:
@@ -389,29 +395,211 @@ def parse_expires_at(value: Any) -> dt.datetime | None:
   return parsed.astimezone(dt.timezone.utc)
 
 
-def read_auth(path: Path) -> tuple[str, dt.datetime | None]:
+def utc_now() -> dt.datetime:
+  return dt.datetime.now(dt.timezone.utc)
+
+
+def format_utc(value: dt.datetime) -> str:
+  return value.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def early_invalidation_secs() -> int:
   try:
-    data = read_json(path)
-  except (OSError, json.JSONDecodeError):
-    return "", None
-  if not isinstance(data, dict) or not data:
-    return "", None
-  preferred = None
-  fallback = None
+    return max(0, int(os.environ.get("GROK_AUTH_EARLY_INVALIDATION_SECS") or "300"))
+  except ValueError:
+    return 300
+
+
+def token_needs_refresh(expires_at: dt.datetime | None, now: dt.datetime | None = None) -> bool:
+  if expires_at is None:
+    return False
+  now = now or utc_now()
+  return expires_at <= now + dt.timedelta(seconds=early_invalidation_secs())
+
+
+def pick_auth_entry(data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+  fallback_key = ""
+  fallback: dict[str, Any] | None = None
   for key, entry in data.items():
     if not isinstance(entry, dict):
       continue
-    if not str(entry.get("key") or "").strip():
+    if not str(entry.get("key") or "").strip() and not str(entry.get("refresh_token") or "").strip():
       continue
     if str(key).startswith("https://auth.x.ai::"):
-      preferred = entry
-      break
+      return str(key), entry
     if fallback is None:
+      fallback_key = str(key)
       fallback = entry
-  entry = preferred or fallback
-  if entry is None:
-    return "", None
-  return str(entry.get("key") or "").strip(), parse_expires_at(entry.get("expires_at"))
+  return fallback_key, fallback or {}
+
+
+def read_auth_file(path: Path) -> tuple[dict[str, Any], str, dict[str, Any]]:
+  try:
+    data = read_json(path)
+  except (OSError, json.JSONDecodeError):
+    return {}, "", {}
+  if not isinstance(data, dict) or not data:
+    return {}, "", {}
+  scope, entry = pick_auth_entry(data)
+  return data, scope, entry
+
+
+def auth_client_id(scope: str, entry: dict[str, Any]) -> str:
+  client_id = str(entry.get("oidc_client_id") or "").strip()
+  if client_id:
+    return client_id
+  if "::" in scope:
+    return scope.split("::", 1)[1].strip()
+  return ""
+
+
+def write_auth_file(path: Path, payload: dict[str, Any]) -> None:
+  handle_fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+  tmp = Path(tmp_name)
+  try:
+    with os.fdopen(handle_fd, "w", encoding="utf-8") as handle:
+      handle.write(json.dumps(payload, indent=2) + "\n")
+    os.chmod(tmp, 0o600)
+    tmp.replace(path)
+  except BaseException:
+    tmp.unlink(missing_ok=True)
+    raise
+
+
+def acquire_auth_lock(lock_path: Path, timeout: float):
+  lock_path.parent.mkdir(parents=True, exist_ok=True)
+  handle = lock_path.open("a+")
+  deadline = time.time() + timeout
+  while True:
+    try:
+      fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+      return handle
+    except BlockingIOError:
+      if time.time() >= deadline:
+        handle.close()
+        return None
+      time.sleep(0.1)
+
+
+def post_form(url: str, fields: dict[str, str]) -> dict[str, Any]:
+  body = urllib.parse.urlencode(fields).encode("utf-8")
+  request = urllib.request.Request(
+    url,
+    data=body,
+    headers={
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Accept": "application/json",
+      "User-Agent": "omarchy-agent-usage-grok",
+    },
+    method="POST",
+  )
+  with urllib.request.urlopen(request, timeout=12) as response:
+    payload = json.load(response)
+    return payload if isinstance(payload, dict) else {}
+
+
+def token_endpoint_url(issuer: str) -> str:
+  issuer = issuer.rstrip("/")
+  if issuer == DEFAULT_ISSUER:
+    return DEFAULT_TOKEN_ENDPOINT
+  return issuer + "/oauth2/token"
+
+
+def refresh_access_token(issuer: str, client_id: str, refresh_token: str) -> tuple[dict[str, Any] | None, str]:
+  if not issuer or not client_id or not refresh_token:
+    return None, "rejected"
+  try:
+    payload = post_form(token_endpoint_url(issuer), {
+      "grant_type": "refresh_token",
+      "refresh_token": refresh_token,
+      "client_id": client_id,
+    })
+  except urllib.error.HTTPError as error:
+    if error.code in (400, 401, 403):
+      return None, "rejected"
+    return None, "network"
+  except Exception:
+    return None, "network"
+  if not str(payload.get("access_token") or "").strip():
+    return None, "rejected"
+  return payload, ""
+
+
+def apply_token_payload(entry: dict[str, Any], payload: dict[str, Any], now: dt.datetime) -> str:
+  token = str(payload.get("access_token") or "").strip()
+  entry["key"] = token
+  new_refresh = str(payload.get("refresh_token") or "").strip()
+  if new_refresh:
+    entry["refresh_token"] = new_refresh
+  try:
+    seconds = float(payload.get("expires_in"))
+  except (TypeError, ValueError):
+    seconds = 0.0
+  if seconds > 0:
+    entry["expires_at"] = format_utc(now + dt.timedelta(seconds=seconds))
+  entry["create_time"] = format_utc(now)
+  return token
+
+
+def ensure_access_token(path: Path, force: bool = False) -> tuple[str, str]:
+  """Return (access_token, error) where error is '' | 'missing' | 'expired' | 'network'."""
+  data, scope, entry = read_auth_file(path)
+  token = str(entry.get("key") or "").strip()
+  refresh_token = str(entry.get("refresh_token") or "").strip()
+  expires_at = parse_expires_at(entry.get("expires_at"))
+  if not token and not refresh_token:
+    return "", "missing"
+  if token and not force and not token_needs_refresh(expires_at):
+    return token, ""
+  if not refresh_token:
+    if not token or force or token_needs_refresh(expires_at):
+      return token, "expired"
+    return token, ""
+
+  lock = acquire_auth_lock(path.with_name(path.name + ".lock"), AUTH_LOCK_WAIT_SECS)
+  try:
+    data, scope, entry = read_auth_file(path)
+    token = str(entry.get("key") or "").strip()
+    refresh_token = str(entry.get("refresh_token") or "").strip()
+    expires_at = parse_expires_at(entry.get("expires_at"))
+    if token and not force and not token_needs_refresh(expires_at):
+      return token, ""
+    if not refresh_token:
+      if not token or force or token_needs_refresh(expires_at):
+        return token, "expired"
+      return token, ""
+    if lock is None:
+      # Grok (or another collector) holds auth.json.lock. Do not mint a
+      # second refresh; that can rotate the refresh token out from under it.
+      if token and expires_at is not None and expires_at > utc_now():
+        return token, ""
+      return token, "network"
+
+    issuer = str(entry.get("oidc_issuer") or DEFAULT_ISSUER).strip() or DEFAULT_ISSUER
+    client_id = auth_client_id(scope, entry)
+    payload, error = refresh_access_token(issuer, client_id, refresh_token)
+    if payload is None:
+      if error == "network":
+        if token and expires_at is not None and expires_at > utc_now():
+          return token, ""
+        return token, "network"
+      return token, "expired"
+    now = utc_now()
+    token = apply_token_payload(entry, payload, now)
+    if scope:
+      data[scope] = entry
+    try:
+      write_auth_file(path, data)
+    except Exception as exc:
+      print(f"omarchy-agent-usage-grok: could not write refreshed auth ({exc})", file=sys.stderr)
+    return token, ""
+  finally:
+    if lock is not None:
+      try:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+      except OSError:
+        pass
+      lock.close()
 
 
 def plan_label(tier: str) -> str:
@@ -494,7 +682,7 @@ def parse_billing(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[s
   return limits, balance
 
 
-def collect_limits(token: str, expires_at: dt.datetime | None) -> dict[str, Any]:
+def collect_limits(auth_path: Path) -> dict[str, Any]:
   result: dict[str, Any] = {
     "limits": [],
     "tierLabel": "",
@@ -502,28 +690,59 @@ def collect_limits(token: str, expires_at: dt.datetime | None) -> dict[str, Any]
     "authHelpText": AUTH_HELP,
     "balance": None,
   }
-  now = dt.datetime.now(dt.timezone.utc)
+  token, auth_error = ensure_access_token(auth_path)
+  if auth_error == "expired":
+    result["usageStatusText"] = "Sign-in expired"
+    return result
+  if auth_error == "network":
+    result["usageStatusText"] = "Grok limits unavailable"
+    result["authHelpText"] = "Couldn't refresh Grok's session token. Retrying shortly. Local Grok stats are still shown."
+    result["retryAdvised"] = True
+    return result
   if not token:
     result["usageStatusText"] = "Waiting for auth"
     return result
-  if expires_at is not None and expires_at <= now:
-    result["usageStatusText"] = "Sign-in expired"
-    return result
 
-  base = proxy_base()
+  def probe(access_token: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    base = proxy_base()
+    return fetch_json(base + BILLING_PATH, access_token), fetch_json(base + USER_PATH, access_token)
+
   try:
-    billing = fetch_json(base + BILLING_PATH, token)
-    user = fetch_json(base + USER_PATH, token)
+    billing, user = probe(token)
   except urllib.error.HTTPError as error:
     if error.code in (401, 403):
-      result["usageStatusText"] = "Sign-in expired"
-      result["authHelpText"] = "Grok rejected the saved login"
+      retried, retry_error = ensure_access_token(auth_path, force=True)
+      if retried and retry_error == "":
+        try:
+          billing, user = probe(retried)
+        except urllib.error.HTTPError as retry_http:
+          if retry_http.code in (401, 403):
+            result["usageStatusText"] = "Sign-in expired"
+            result["authHelpText"] = "Grok rejected the saved login"
+            return result
+          result["usageStatusText"] = "Grok limits unavailable"
+          result["authHelpText"] = f"Grok's usage endpoint returned status {retry_http.code}. Local Grok stats are still shown."
+          return result
+        except Exception:
+          result["usageStatusText"] = "Grok limits unavailable"
+          result["authHelpText"] = "Couldn't reach Grok's usage endpoint. Retrying shortly. Local Grok stats are still shown."
+          result["retryAdvised"] = True
+          return result
+      elif retry_error == "network":
+        result["usageStatusText"] = "Grok limits unavailable"
+        result["authHelpText"] = "Couldn't refresh Grok's session token. Retrying shortly. Local Grok stats are still shown."
+        result["retryAdvised"] = True
+        return result
+      else:
+        result["usageStatusText"] = "Sign-in expired"
+        result["authHelpText"] = "Grok rejected the saved login"
+        return result
+    else:
+      # A status came from a server that answered, so retrying in 30 seconds
+      # would only pester it; the regular refresh will pick the limits back up.
+      result["usageStatusText"] = "Grok limits unavailable"
+      result["authHelpText"] = f"Grok's usage endpoint returned status {error.code}. Local Grok stats are still shown."
       return result
-    # A status came from a server that answered, so retrying in 30 seconds
-    # would only pester it; the regular refresh will pick the limits back up.
-    result["usageStatusText"] = "Grok limits unavailable"
-    result["authHelpText"] = f"Grok's usage endpoint returned status {error.code}. Local Grok stats are still shown."
-    return result
   except Exception:
     result["usageStatusText"] = "Grok limits unavailable"
     result["authHelpText"] = "Couldn't reach Grok's usage endpoint. Retrying shortly. Local Grok stats are still shown."
@@ -544,8 +763,7 @@ def collect_limits(token: str, expires_at: dt.datetime | None) -> dict[str, Any]
 
 def build_record(force: bool = False, limits_only: bool = False) -> dict[str, Any]:
   stats = local_stats(force, limits_only)
-  token, expires_at = read_auth(grok_home() / "auth.json")
-  limits = collect_limits(token, expires_at)
+  limits = collect_limits(grok_home() / "auth.json")
   record = {
     "schemaVersion": 1,
     "id": AGENT_ID,

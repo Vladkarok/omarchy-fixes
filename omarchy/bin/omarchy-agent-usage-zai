@@ -1,0 +1,867 @@
+#!/usr/bin/python3
+# omarchy:summary=Print the Z.ai GLM Coding Plan usage record as JSON
+# omarchy:args=[--force] [--limits-only]
+# omarchy:hidden=true
+"""Collect Z.ai (GLM Coding Plan) usage into one display-ready JSON record.
+
+Adapted from omacom/omarchy#7566. The limits half is that PR's: rate limits
+and the plan tier come from Z.ai's coding-plan monitor endpoint
+(…/api/monitor/usage/quota/limit), which reports the rolling 5-hour and
+weekly token windows. That endpoint only answers for keys that carry a
+Coding Plan; a generic pay-as-you-go key gets "no coding plan" and the
+record falls back to local stats alone, exactly like the claude collector
+without a signed-in CLI.
+
+Two sources differ from the PR, because this machine runs GLM through
+ZCode rather than pi or omp:
+
+- Credentials: ZCode stores the Coding Plan API key it derives from the
+  Z.ai OAuth login in ~/.zcode/v2/config.json, under the enabled
+  builtin:zai-coding-plan (or bigmodel) provider. That key is read after
+  the PR's own sources (config file, env, pi/omp .env).
+- Local stats: ZCode records one model_usage row per model request in
+  ~/.zcode/cli/db/db.sqlite. Those rows carry the z.ai provider id, the
+  model, the token split, and the turn, which gives prompts, sessions,
+  and tokens by day and model. The PR's pi/omp session scan still runs
+  and is merged in.
+
+Both the local scan and the network probe are cached: the panel fires
+--limits-only on every open, so a repeated open must reuse a recent scan
+and must not re-probe Z.ai more than once every few seconds. The agents
+panel only ever reads the JSON this prints.
+
+A second Z.ai subscription can live beside the OAuth login as a plain
+console API key (see omarchy-zai-account, which saves those keys). Run
+with --account <label> to build that account's record instead of the
+primary one: limits come from its saved key, local stats from the provider
+slot its key is attached to in ZCode (builtin:zai), and the pi/omp session
+scan is skipped — session rows carry no account, so they cannot be split.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+import re
+import sqlite3
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+AGENT_ID = "zai"
+AGENT_NAME = "Z.ai"
+AUTH_HELP_NO_KEY = (
+  "Sign in to Z.ai in ZCode (or set ZAI_API_KEY) to show Coding Plan limits."
+)
+AUTH_HELP_BAD_KEY = (
+  "Z.ai rejected the saved API key; re-login in ZCode or check ~/.config/omarchy/agents/zai.json."
+)
+
+# Global (Z.ai) vs China (Zhipu / BigModel) split the same API under two hosts.
+PLATFORMS = {
+  "zai": "https://api.z.ai",
+  "zhipu": "https://open.bigmodel.cn",
+}
+QUOTA_PATH = "/api/monitor/usage/quota/limit"
+
+# Coding-plan limit windows are tagged by (unit, number); the monitor endpoint
+# reports one CREDIT_LIMIT row per window (older responses used TOKENS_LIMIT).
+LIMIT_TYPES = {"CREDIT_LIMIT", "TOKENS_LIMIT"}
+LIMIT_WINDOWS = {
+  (3, 5): "Session (5-hour)",
+  (6, 1): "Weekly (7-day)",
+}
+
+# ZCode persists the plan key it derives from the OAuth login per provider;
+# the coding-plan key is the one the monitor endpoint answers. bigmodel
+# providers live on the Zhipu host, the zai ones on api.z.ai.
+ZCODE_CONFIG_PATH = Path.home() / ".zcode" / "v2" / "config.json"
+ZCODE_PROVIDERS = (
+  ("builtin:zai-coding-plan", "zai"),
+  ("builtin:zai-start-plan", "zai"),
+  ("builtin:bigmodel-coding-plan", "zhipu"),
+  ("builtin:bigmodel-start-plan", "zhipu"),
+)
+
+# ZCode logs one model_usage row per model request. Subagent, compact, and
+# session-title requests burn plan tokens too, so they all count toward
+# usage; only main_turn turns count as prompts.
+ZCODE_DB_PATH = Path.home() / ".zcode" / "cli" / "db" / "db.sqlite"
+ZCODE_PROVIDER_GLOB = ("builtin:zai-%", "builtin:bigmodel-%")
+
+# Named second accounts (see omarchy-zai-account). Their keys live in the
+# same file the upstream config-file source reads; an account record's local
+# stats come from the one provider slot an attached key serves, because that
+# is the only place ZCode records a second Z.ai key's requests under.
+STATE_PATH = Path(
+  os.environ.get("OMARCHY_ZAI_ACCOUNTS")
+  or (Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "omarchy" / "agents" / "zai.json")
+)
+ACCOUNT_STATS_PROVIDER = os.environ.get("OMARCHY_ZAI_STATS_PROVIDER") or "builtin:zai"
+
+# A scan this recent is only reused to dedup concurrent collector runs (the
+# update command backgrounds one per agent while the panel refreshes on its
+# own); every periodic widget refresh lands a real rescan. --limits-only
+# promises only fresh limits, so it may reuse a scan for up to 15 minutes.
+SCAN_REUSE_SECONDS = 20
+LIMITS_ONLY_REUSE_SECONDS = 900
+# The panel opens and shuts fire a probe each; a recent probe result is reused
+# for this window rather than turning every flick into a request.
+PROBE_MIN_INTERVAL_SECONDS = 15
+
+now = datetime.now()
+today = now.strftime("%Y-%m-%d")
+recent_dates = [(now - timedelta(days=offset)).strftime("%Y-%m-%d") for offset in range(6, -1, -1)]
+
+
+def number(value: Any) -> int:
+  try:
+    return max(0, int(value or 0))
+  except (TypeError, ValueError):
+    return 0
+
+
+def local_day(value: Any) -> str:
+  if value is None:
+    return datetime.now().strftime("%Y-%m-%d")
+  if isinstance(value, (int, float)):
+    # pi/omp message timestamps and ZCode's started_at are milliseconds.
+    if value > 10_000_000_000:
+      value = value / 1000
+    return datetime.fromtimestamp(value).strftime("%Y-%m-%d")
+  text = str(value)
+  try:
+    if text.endswith("Z"):
+      dt = datetime.fromisoformat(text[:-1] + "+00:00")
+    else:
+      dt = datetime.fromisoformat(text)
+    if dt.tzinfo is not None:
+      dt = dt.astimezone()
+    return dt.strftime("%Y-%m-%d")
+  except ValueError:
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def empty_bucket() -> dict[str, int]:
+  return {
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "cacheReadInputTokens": 0,
+    "cacheCreationInputTokens": 0,
+  }
+
+
+def empty_stats() -> dict[str, Any]:
+  return {
+    "todayPrompts": 0,
+    "todaySessions": 0,
+    "todayTotalTokens": 0,
+    "todayTokensByModel": {},
+    "recentDays": [],
+    "totalPrompts": 0,
+    "totalSessions": 0,
+    "activeDays": 0,
+    "activeDates": [],
+    "modelUsage": {},
+  }
+
+
+def base_record(**overrides: Any) -> dict[str, Any]:
+  record: dict[str, Any] = {
+    "schemaVersion": 1,
+    "id": AGENT_ID,
+    "name": AGENT_NAME,
+    "updatedAt": datetime.now(timezone.utc).isoformat(),
+    "ready": False,
+    "hasLocalStats": False,
+    "hasPromptStats": True,
+    "tierLabel": "",
+    "usageStatusText": "",
+    "authHelpText": "",
+    "limits": [],
+  }
+  record.update(empty_stats())
+  record.update(overrides)
+  return record
+
+
+# --------------------------------------------------------------------------
+# Cache primitives (shared by the local-stats scan and the limits probe)
+# --------------------------------------------------------------------------
+
+def cache_root() -> Path:
+  root = Path(os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")) / "omarchy" / "agent-usage"
+  root.mkdir(parents=True, exist_ok=True)
+  return root
+
+
+def read_fresh_json(path: Path, max_age_seconds: float) -> Any:
+  if max_age_seconds <= 0 or not path.exists():
+    return None
+  try:
+    # A negative age means the mtime is in the future: the clock moved
+    # backwards since the write, so the cache's freshness cannot be trusted.
+    age = time.time() - path.stat().st_mtime
+    if 0 <= age <= max_age_seconds:
+      return json.loads(path.read_text(encoding="utf-8"))
+  except Exception:
+    return None
+  return None
+
+
+def write_json(path: Path, payload: Any) -> None:
+  # A temp name unique to this writer, not derived from the target: several
+  # collectors can run at once, and a shared temp path means the second
+  # replace finds the first one's file already moved away.
+  handle_fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+  tmp = Path(tmp_name)
+  try:
+    with os.fdopen(handle_fd, "w", encoding="utf-8") as handle:
+      handle.write(json.dumps(payload, separators=(",", ":")) + "\n")
+    tmp.chmod(0o644)
+    tmp.replace(path)
+  except BaseException:
+    tmp.unlink(missing_ok=True)
+    raise
+
+
+# --------------------------------------------------------------------------
+# Credentials
+# --------------------------------------------------------------------------
+
+def read_env_file(path: Path) -> dict[str, str]:
+  values: dict[str, str] = {}
+  try:
+    for line in path.read_text().splitlines():
+      line = line.strip()
+      if line.startswith("export "):
+        line = line[len("export "):].strip()
+      if not line or line.startswith("#") or "=" not in line:
+        continue
+      key, _, val = line.partition("=")
+      values[key.strip()] = val.strip().strip("'\"")
+  except OSError:
+    return {}
+  return values
+
+
+def read_config() -> dict[str, Any]:
+  config_home = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+  try:
+    parsed = json.loads((config_home / "omarchy" / "agents" / "zai.json").read_text())
+    return parsed if isinstance(parsed, dict) else {}
+  except (OSError, json.JSONDecodeError):
+    return {}
+
+
+def read_zcode_plan_key() -> tuple[str, str]:
+  """Return (api_key, platform) from ZCode's stored Coding Plan keys.
+
+  ZCode derives a plan-scoped API key at OAuth login and saves it on the
+  enabled provider; the coding-plan provider comes first because the
+  monitor endpoint only answers for plan keys, never for the pay-as-you-go
+  start-plan key.
+  """
+  try:
+    config = json.loads(ZCODE_CONFIG_PATH.read_text())
+  except (OSError, json.JSONDecodeError):
+    return "", ""
+  providers = config.get("provider") if isinstance(config.get("provider"), dict) else {}
+  for provider_id, platform in ZCODE_PROVIDERS:
+    entry = providers.get(provider_id)
+    if not isinstance(entry, dict) or entry.get("enabled") is False:
+      continue
+    options = entry.get("options")
+    if isinstance(options, str):
+      try:
+        options = json.loads(options)
+      except json.JSONDecodeError:
+        continue
+    if not isinstance(options, dict):
+      continue
+    key = str(options.get("apiKey") or "").strip()
+    if key:
+      return key, platform
+  return "", ""
+
+
+def sanitize_label(label: str) -> str:
+  return re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "account"
+
+
+def key_fingerprint(api_key: str) -> str:
+  # Same digest omarchy-zai-account stores in the state file.
+  return hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
+
+
+def read_accounts() -> dict[str, Any]:
+  """Named accounts from omarchy-zai-account's state file, if any."""
+  try:
+    state = json.loads(STATE_PATH.read_text())
+  except (OSError, json.JSONDecodeError):
+    return {}
+  accounts = state.get("accounts") if isinstance(state, dict) else None
+  return accounts if isinstance(accounts, dict) else {}
+
+
+def read_account_entry(label: str) -> dict[str, Any] | None:
+  entry = read_accounts().get(label)
+  return entry if isinstance(entry, dict) else None
+
+
+def credentials() -> tuple[str, str]:
+  """Return (api_key, platform). Platform is a PLATFORMS key."""
+  config = read_config()
+
+  # An explicit config file wins, then live env, then whatever omp/pi or
+  # ZCode stored.
+  key = str(config.get("apiKey") or "").strip()
+  platform = str(config.get("platform") or "").strip().lower()
+
+  if not key:
+    if os.environ.get("ZAI_API_KEY"):
+      key, platform = os.environ["ZAI_API_KEY"].strip(), platform or "zai"
+    elif os.environ.get("ZHIPU_API_KEY") or os.environ.get("ZHIPUAI_API_KEY"):
+      key = (os.environ.get("ZHIPU_API_KEY") or os.environ.get("ZHIPUAI_API_KEY")).strip()
+      platform = platform or "zhipu"
+
+  if not key:
+    for env_path in (
+      Path.home() / ".omp" / "agent" / ".env",
+      Path.home() / ".pi" / "agent" / ".env",
+    ):
+      values = read_env_file(env_path)
+      if values.get("ZAI_API_KEY"):
+        key, platform = values["ZAI_API_KEY"], platform or "zai"
+        break
+      if values.get("ZHIPU_API_KEY") or values.get("ZHIPUAI_API_KEY"):
+        key = values.get("ZHIPU_API_KEY") or values["ZHIPUAI_API_KEY"]
+        platform = platform or "zhipu"
+        break
+
+  if not key:
+    zcode_key, zcode_platform = read_zcode_plan_key()
+    if zcode_key:
+      key = zcode_key
+      platform = platform or zcode_platform
+
+  if platform not in PLATFORMS:
+    platform = "zai"
+  return key, platform
+
+
+# --------------------------------------------------------------------------
+# Coding-plan limits
+# --------------------------------------------------------------------------
+
+def iso_from_ms(value: Any) -> str:
+  try:
+    ts = float(value)
+  except (TypeError, ValueError):
+    return ""
+  if ts <= 0:
+    return ""
+  # The field is milliseconds, but a plain-seconds epoch (< year 33658) is
+  # accepted too rather than rendered as a date 1000x in the future.
+  if ts < 1e12:
+    ts *= 1000
+  try:
+    return datetime.fromtimestamp(ts / 1000, timezone.utc).isoformat()
+  except (OverflowError, OSError, ValueError):
+    return ""
+
+
+def fetch_limits(api_key: str, platform: str) -> dict[str, Any]:
+  """Probe the monitor endpoint.
+
+  On success returns {"limits": [...], "tierLabel": str}. On a miss returns
+  {"status": str} plus, when applicable, "transport" (reached no server, so
+  worth an early retry) or "keyRejected" (the key itself is bad). The endpoint
+  answers HTTP 200 even when the key has no plan, carrying
+  {"success": false, "msg": "…coding plan…"} instead of a data payload.
+  """
+  url = PLATFORMS[platform] + QUOTA_PATH
+  request = urllib.request.Request(
+    url,
+    method="GET",
+    headers={
+      # This endpoint takes the raw token, not a Bearer prefix.
+      "Authorization": api_key,
+      "Accept-Language": "en-US,en",
+      "Content-Type": "application/json",
+    },
+  )
+  try:
+    with urllib.request.urlopen(request, timeout=15) as response:
+      body = json.load(response)
+  except urllib.error.HTTPError as error:
+    if error.code in (401, 403):
+      return {"status": "Z.ai rejected the API key", "keyRejected": True}
+    return {"status": f"Z.ai monitor returned HTTP {error.code}"}
+  except (urllib.error.URLError, TimeoutError):
+    return {"status": "Could not reach the Z.ai monitor endpoint", "transport": True}
+  except json.JSONDecodeError:
+    return {"status": "Z.ai returned an invalid monitor response"}
+
+  data = body.get("data") if isinstance(body, dict) else None
+  if not isinstance(data, dict) or not isinstance(data.get("limits"), list):
+    msg = str(body.get("msg") or "").strip() if isinstance(body, dict) else ""
+    if "expired or incorrect" in msg.lower():
+      # ZCode rotates this key on login; a stale one means re-login.
+      status = "Z.ai rejected the stored plan key"
+    elif "coding plan" in msg.lower():
+      status = "No GLM Coding Plan on this key"
+    else:
+      status = msg or "Coding Plan limits unavailable"
+    return {"status": status}
+
+  limits = []
+  for item in data["limits"]:
+    if not isinstance(item, dict) or item.get("type") not in LIMIT_TYPES:
+      continue
+    label = LIMIT_WINDOWS.get((item.get("unit"), item.get("number")))
+    if not label:
+      # A window Z.ai adds later would vanish silently otherwise.
+      print(
+        f"omarchy-agent-usage-zai: unmapped limit window (unit={item.get('unit')}, "
+        f"number={item.get('number')})",
+        file=sys.stderr,
+      )
+      continue
+    try:
+      percent = max(0.0, min(1.0, float(item.get("percentage")) / 100.0))
+    except (TypeError, ValueError):
+      # A missing/unparseable percentage is skipped: a false 0% meter reads
+      # as a fresh allowance, which is worse than showing one fewer window.
+      continue
+    limits.append({
+      "label": label,
+      "percent": percent,
+      "resetsAt": iso_from_ms(item.get("nextResetTime")),
+    })
+
+  tier = str(data.get("level") or "").strip()
+  return {"limits": limits, "tierLabel": tier[:1].upper() + tier[1:].lower() if tier else ""}
+
+
+# A cached percentage outlives the probe that measured it, but only until its
+# window rolls over: once a window has reset, the figure describes a period
+# that is over. A window with no reset time, or one that will not parse, is
+# kept — an unreadable timestamp is no reason to throw away a real number.
+def limit_window_open(entry: dict[str, Any], now_utc: datetime) -> bool:
+  raw = str(entry.get("resetsAt") or "")
+  if raw == "":
+    return True
+  try:
+    resets_at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+  except ValueError:
+    return True
+  if resets_at.tzinfo is None:
+    resets_at = resets_at.replace(tzinfo=timezone.utc)
+  return resets_at > now_utc
+
+
+def usable_cached_limits(cached: dict[str, Any]) -> list[dict[str, Any]]:
+  entries = cached.get("limits")
+  if not isinstance(entries, list):
+    return []
+  now_utc = datetime.now(timezone.utc)
+  return [entry for entry in entries if isinstance(entry, dict) and limit_window_open(entry, now_utc)]
+
+
+def collect_limits(api_key: str, platform: str, force: bool) -> dict[str, Any]:
+  """Fresh limits when a probe is due, else the last known ones.
+
+  Reuses a recent probe for PROBE_MIN_INTERVAL_SECONDS so repeated panel opens
+  do not spam the endpoint, and keeps the last known limits as the answer of
+  record when a later probe fails but its window has not yet reset.
+  """
+  result = {"limits": [], "tierLabel": "", "usageStatusText": "", "authHelpText": "", "retryAdvised": False}
+
+  # Per-key cache: a second account's probe must not serve the primary's
+  # windows (and vice versa).
+  probe_cache = cache_root() / f"zai-limits-{key_fingerprint(api_key)}.json"
+  cached = read_fresh_json(probe_cache, float("inf")) or {}
+  fallback = usable_cached_limits(cached) if isinstance(cached, dict) else []
+  cached_tier = str(cached.get("tierLabel") or "") if isinstance(cached, dict) else ""
+
+  fetched_at = number(cached.get("fetchedAtMs")) / 1000 if isinstance(cached, dict) else 0
+  if fallback and not force and time.time() - fetched_at < PROBE_MIN_INTERVAL_SECONDS:
+    result["limits"], result["tierLabel"] = fallback, cached_tier
+    return result
+
+  probe = fetch_limits(api_key, platform)
+  if probe.get("limits"):
+    result["limits"] = probe["limits"]
+    result["tierLabel"] = probe.get("tierLabel", "")
+    try:
+      write_json(probe_cache, {
+        "fetchedAtMs": round(time.time() * 1000),
+        "limits": probe["limits"],
+        "tierLabel": result["tierLabel"],
+      })
+    except Exception as exc:
+      print(f"omarchy-agent-usage-zai: could not write limits cache ({exc})", file=sys.stderr)
+    return result
+
+  # No fresh limits. A transport failure reached no server — typically the
+  # seconds after login before the network is up — so ask the shell to retry
+  # sooner than its regular interval.
+  if probe.get("transport"):
+    result["retryAdvised"] = True
+  if fallback:
+    result["limits"], result["tierLabel"] = fallback, cached_tier
+  result["usageStatusText"] = probe.get("status", "")
+  # Only blame the key when the key is the problem; a working key with no plan,
+  # or an endpoint hiccup, must not tell the user to go set a key they have.
+  if probe.get("keyRejected"):
+    result["authHelpText"] = AUTH_HELP_BAD_KEY
+  return result
+
+
+# --------------------------------------------------------------------------
+# Local session stats
+# --------------------------------------------------------------------------
+
+class stats_accumulator:
+  """One day/model/session ledger that either scan source can feed."""
+
+  def __init__(self) -> None:
+    self.recent = {day: {"date": day, "messageCount": 0} for day in recent_dates}
+    self.model_usage: dict[str, dict[str, int]] = {}
+    self.today_by_model: dict[str, int] = {}
+    self.active_dates: set[str] = set()
+    self.total_sessions: set[str] = set()
+    self.today_sessions: set[str] = set()
+    self.total_prompts = 0
+    self.today_prompts = 0
+    self.today_tokens = 0
+
+  def add_usage(self, day: str, session_key: str, prompt_key: str | None, model: str,
+                inp: int, out: int, cread: int, cwrite: int) -> None:
+    total = inp + out + cread + cwrite
+    if prompt_key:
+      self.total_prompts += 1
+    self.total_sessions.add(session_key)
+    self.active_dates.add(day)
+    bucket = self.model_usage.setdefault(model, empty_bucket())
+    bucket["inputTokens"] += inp
+    bucket["outputTokens"] += out
+    bucket["cacheReadInputTokens"] += cread
+    bucket["cacheCreationInputTokens"] += cwrite
+    if day in self.recent:
+      self.recent[day]["messageCount"] += total
+    if day == today:
+      if prompt_key:
+        self.today_prompts += 1
+        self.today_sessions.add(session_key)
+      self.today_tokens += total
+      self.today_by_model[model] = self.today_by_model.get(model, 0) + total
+
+  def stats(self) -> dict[str, Any]:
+    return {
+      "hasLocalStats": bool(self.model_usage),
+      "todayPrompts": self.today_prompts,
+      "todaySessions": len(self.today_sessions),
+      "todayTotalTokens": self.today_tokens,
+      "todayTokensByModel": self.today_by_model,
+      "recentDays": [self.recent[day] for day in recent_dates],
+      "totalPrompts": self.total_prompts,
+      "totalSessions": len(self.total_sessions),
+      "activeDays": len(self.active_dates),
+      "activeDates": sorted(self.active_dates),
+      "modelUsage": self.model_usage,
+    }
+
+
+def scan_zcode(ledger: stats_accumulator, providers: tuple[str, ...] = ZCODE_PROVIDER_GLOB,
+               exact: bool = False) -> None:
+  """Fold ZCode's model_usage rows into the ledger.
+
+  Every row is one billed model request, so every row's tokens count; a
+  turn fans out into many requests, so prompts are distinct main_turn
+  turn ids. Rows stay only as long as ZCode's database does, so the
+  all-time totals cover that window, not the account's lifetime. exact
+  selects one provider id verbatim — an attached second account's slot —
+  instead of the subscription globs.
+  """
+  if not ZCODE_DB_PATH.is_file():
+    return
+  if exact:
+    where, params = "provider_id = ?", (providers[0],)
+  else:
+    where = " OR ".join("provider_id LIKE ?" for _ in providers)
+    params = tuple(providers)
+  query = (
+    "SELECT started_at, model_id, query_source, turn_id, session_id,"
+    " input_tokens, output_tokens, reasoning_tokens,"
+    " cache_read_input_tokens, cache_creation_input_tokens"
+    f" FROM model_usage WHERE {where}"
+  )
+  try:
+    connection = sqlite3.connect(f"file:{ZCODE_DB_PATH}?mode=ro", uri=True, timeout=2)
+    try:
+      rows = connection.execute(query, params).fetchall()
+    finally:
+      connection.close()
+  except sqlite3.Error as exc:
+    print(f"omarchy-agent-usage-zai: ZCode usage database unreadable ({exc})", file=sys.stderr)
+    return
+
+  seen_turns: set[str] = set()
+  for started_at, model_id, query_source, turn_id, session_id, inp, out, reasoning, cread, cwrite in rows:
+    inp = number(inp)
+    # Reasoning is usually already folded into output; only add the excess
+    # if a future schema reports it separately.
+    if number(reasoning) > number(out):
+      out += number(reasoning) - number(out)
+    else:
+      out = number(out)
+    cread, cwrite = number(cread), number(cwrite)
+    if not (inp or out or cread or cwrite):
+      continue
+    prompt_key = None
+    if query_source == "main_turn" and turn_id:
+      prompt_key = str(turn_id)
+      if prompt_key in seen_turns:
+        prompt_key = None
+      else:
+        seen_turns.add(prompt_key)
+    ledger.add_usage(
+      local_day(started_at),
+      str(session_id or ""),
+      prompt_key,
+      str(model_id or "glm"),
+      inp, out, cread, cwrite,
+    )
+
+
+def scan_sessions(ledger: stats_accumulator) -> None:
+  """Fold pi/omp assistant messages on the Z.ai provider into the ledger."""
+  roots = [
+    Path.home() / ".pi" / "agent" / "sessions",
+    Path.home() / ".omp" / "agent" / "sessions",
+  ]
+  for root in roots:
+    if not root.exists():
+      continue
+    for path in root.rglob("*.jsonl"):
+      try:
+        handle = path.open(errors="replace")
+      except OSError:
+        continue
+      with handle:
+        for line in handle:
+          # Cheap substring gate before the JSON parse: an assistant turn on a
+          # Z.ai provider always carries both markers.
+          if '"usage"' not in line or ('"zai"' not in line and '"zhipu"' not in line):
+            continue
+          try:
+            entry = json.loads(line)
+          except json.JSONDecodeError:
+            continue
+          if not isinstance(entry, dict) or entry.get("type") != "message":
+            continue
+          # One malformed line (a non-dict where a dict belongs) must not take
+          # every real stat down with it, so each shape is checked explicitly.
+          message = entry.get("message")
+          if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+          # Exact provider match: a custom `zai-proxy` gateway is not this
+          # subscription, the same discipline the stock collectors keep.
+          provider = str(message.get("provider") or "").lower()
+          if provider not in ("zai", "zhipu"):
+            continue
+          usage = message.get("usage")
+          if not isinstance(usage, dict):
+            continue
+          inp = number(usage.get("input"))
+          # pi reports reasoning tokens apart from output; both are generated.
+          out = number(usage.get("output")) + number(usage.get("reasoning"))
+          cread = number(usage.get("cacheRead"))
+          cwrite = number(usage.get("cacheWrite"))
+          if not (inp or out or cread or cwrite):
+            inp = number(usage.get("totalTokens"))
+          if not (inp or out or cread or cwrite):
+            continue
+          ledger.add_usage(
+            local_day(entry.get("timestamp") or message.get("timestamp")),
+            str(path),
+            str(entry.get("id") or "") or None,
+            str(message.get("model") or "glm"),
+            inp, out, cread, cwrite,
+          )
+
+
+def scan_cache_paths(providers: tuple[str, ...] = ZCODE_PROVIDER_GLOB,
+                     exact: bool = False) -> tuple[Path, Path]:
+  # The digest covers every data path the scan reads (all roots live under
+  # the home directory) plus the provider filter: an account record counts a
+  # different row set than the primary one and must not share its cache.
+  spec = f"exact:{providers[0]}" if exact else "glob:" + ",".join(providers)
+  digest = hashlib.sha1((str(Path.home()) + "|" + spec).encode("utf-8")).hexdigest()[:16]
+  root = cache_root()
+  return root / f"zai-scan-{digest}.json", root / f"zai-scan-{digest}.lock"
+
+
+def read_cached_stats(cache_file: Path, max_age_seconds: float) -> dict[str, Any] | None:
+  cached = read_fresh_json(cache_file, max_age_seconds)
+  # Schema 2 adds the ZCode source; a schema-1 cache from the plain PR
+  # collector undercounts this machine and must not be reused.
+  if not isinstance(cached, dict) or cached.get("schemaVersion") != 2:
+    return None
+  # today* fields only mean "today" on the day they were scanned. A cache from
+  # another local date (midnight passed, or the clock moved) is a miss.
+  if cached.get("scanDate") != today:
+    return None
+  stats = cached.get("stats")
+  if not isinstance(stats, dict):
+    return None
+  if not all(key in stats for key in ("todayPrompts", "todayTotalTokens", "recentDays", "activeDates", "modelUsage")):
+    return None
+  return stats
+
+
+def write_cached_stats(cache_file: Path, stats: dict[str, Any]) -> None:
+  try:
+    write_json(cache_file, {"schemaVersion": 2, "scanDate": today, "stats": stats})
+  except Exception as exc:
+    print(f"omarchy-agent-usage-zai: could not write usage cache ({exc})", file=sys.stderr)
+
+
+def cached_local_stats(max_age: float, providers: tuple[str, ...] = ZCODE_PROVIDER_GLOB,
+                       exact: bool = False, sessions: bool = True) -> dict[str, Any]:
+  """Local stats, with the cache as a pure optimization.
+
+  Any cache-layer failure degrades to a direct scan and a warning: the JSON
+  record is the contract, the cache is not.
+  """
+  try:
+    return _cached_local_stats(max_age, providers, exact, sessions)
+  except Exception as exc:
+    print(f"omarchy-agent-usage-zai: cache unavailable ({exc}); scanning directly", file=sys.stderr)
+    ledger = stats_accumulator()
+    scan_zcode(ledger, providers, exact)
+    if sessions:
+      scan_sessions(ledger)
+    return ledger.stats()
+
+
+def _cached_local_stats(max_age: float, providers: tuple[str, ...] = ZCODE_PROVIDER_GLOB,
+                        exact: bool = False, sessions: bool = True) -> dict[str, Any]:
+  cache_file, lock_file = scan_cache_paths(providers, exact)
+
+  cached = read_cached_stats(cache_file, max_age)
+  if cached is not None:
+    return cached
+
+  with lock_file.open("w") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    cached = read_cached_stats(cache_file, max_age)
+    if cached is not None:
+      return cached
+    ledger = stats_accumulator()
+    scan_zcode(ledger, providers, exact)
+    if sessions:
+      scan_sessions(ledger)
+    stats = ledger.stats()
+    write_cached_stats(cache_file, stats)
+    return stats
+
+
+# --------------------------------------------------------------------------
+# Assembly
+# --------------------------------------------------------------------------
+
+def apply_limits(record: dict[str, Any], api_key: str, platform: str, force: bool) -> None:
+  limits = collect_limits(api_key, platform, force)
+  record["limits"] = limits["limits"]
+  if limits["tierLabel"]:
+    record["tierLabel"] = limits["tierLabel"]
+  record["usageStatusText"] = limits["usageStatusText"]
+  if limits["authHelpText"]:
+    record["authHelpText"] = limits["authHelpText"]
+  if limits["retryAdvised"]:
+    record["retryAdvised"] = True
+
+
+def scan(force: bool, limits_only: bool) -> dict[str, Any]:
+  record = base_record()
+  max_age = 0 if force else (LIMITS_ONLY_REUSE_SECONDS if limits_only else SCAN_REUSE_SECONDS)
+  record.update(cached_local_stats(max_age))
+
+  api_key, platform = credentials()
+  if not api_key:
+    record["authHelpText"] = AUTH_HELP_NO_KEY
+    record["ready"] = record["hasLocalStats"]
+    return record
+
+  # A label from omarchy-zai-account attached to this very key renames the
+  # tab ("Z.ai (main)") without changing the record id the panel knows.
+  for label, entry in read_accounts().items():
+    if isinstance(entry, dict) and entry.get("fingerprint") == key_fingerprint(api_key):
+      record["name"] = f"Z.ai ({label})"
+      break
+
+  apply_limits(record, api_key, platform, force)
+  record["ready"] = bool(record["limits"] or record["hasLocalStats"])
+  return record
+
+
+def account_record(label: str, force: bool, limits_only: bool) -> dict[str, Any]:
+  """The record for a named second account (omarchy-zai-account).
+
+  Limits come from that account's saved console key; local stats come from
+  the provider slot the key is attached to in ZCode, the only place its
+  requests are recorded under. pi/omp sessions are skipped: their rows
+  carry no account, so they cannot be split.
+  """
+  record = base_record(id=f"zai-{sanitize_label(label)}", name=f"Z.ai ({label})")
+  max_age = 0 if force else (LIMITS_ONLY_REUSE_SECONDS if limits_only else SCAN_REUSE_SECONDS)
+  record.update(cached_local_stats(max_age, providers=(ACCOUNT_STATS_PROVIDER,), exact=True, sessions=False))
+
+  entry = read_account_entry(label) or {}
+  api_key = str(entry.get("apiKey") or "").strip()
+  if not api_key:
+    record["authHelpText"] = f"No API key saved for '{label}'; run 'omarchy-zai-account add {label}'."
+    record["ready"] = record["hasLocalStats"]
+    return record
+
+  apply_limits(record, api_key, str(entry.get("platform") or "zai"), force)
+  record["ready"] = bool(record["limits"] or record["hasLocalStats"])
+  return record
+
+
+def main() -> int:
+  parser = argparse.ArgumentParser(description="Print the Z.ai GLM usage record as JSON")
+  # --force rescans and re-probes, ignoring both caches. --limits-only reuses a
+  # recent local scan (only the limits probe must be fresh); a bare run reuses a
+  # scan only long enough to dedup concurrent collector runs. --account builds
+  # a named second account's record instead of the primary one.
+  parser.add_argument("--force", action="store_true")
+  parser.add_argument("--limits-only", action="store_true")
+  parser.add_argument("--account", metavar="LABEL")
+  args = parser.parse_args()
+
+  try:
+    if args.account:
+      record = account_record(args.account, args.force, args.limits_only)
+    else:
+      record = scan(args.force, args.limits_only)
+  except Exception as error:  # noqa: BLE001 - a collector must always emit a record
+    record = base_record(usageStatusText="Z.ai unavailable", authHelpText="Z.ai usage scan failed")
+    print(f"omarchy-agent-usage-zai: {type(error).__name__}", file=sys.stderr)
+  print(json.dumps(record, separators=(",", ":")))
+  return 0
+
+
+if __name__ == "__main__":
+  raise SystemExit(main())

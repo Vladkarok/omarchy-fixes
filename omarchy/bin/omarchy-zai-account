@@ -1,0 +1,613 @@
+#!/usr/bin/python3
+# omarchy:summary=Manage several Z.ai (GLM Coding Plan) accounts without re-login
+# omarchy:args=list|add|label|remove|attach|detach|sync|status
+"""Keep two or more Z.ai subscriptions side by side on one machine.
+
+ZCode stores one Coding Plan key per provider, and its OAuth login replaces
+that key, so a second subscription normally means logging out and back in.
+It does not have to: every Z.ai account can mint a plain API key in the
+console, a key tied to that account's own Coding Plan, and ZCode's idle
+`builtin:zai` provider slot talks to the very same
+`api.z.ai/api/anthropic` endpoint the OAuth-derived plan key uses. So the
+second account lives in that slot, switching accounts is picking a model
+from the other provider in the model picker, and nothing ever logs out.
+
+This command is the glue around that:
+
+- `add`/`label`/`remove` curate named accounts in
+  ~/.config/omarchy/agents/zai.json — the same file the usage collector
+  reads, so the panel can tell the accounts apart.
+- `attach` puts a saved key into ZCode's `builtin:zai` slot in
+  ~/.zcode/v2/config.json and generates a per-account service + timer pair
+  that feeds the agents panel a second usage record. ZCode may hold that
+  config in memory and write it back while running, so `attach` warns when
+  the app is up and `sync` re-applies the saved choice afterwards.
+- `detach` clears the slot (the panel record keeps polling limits).
+- `status` probes the quota endpoint for every known key and prints the
+  per-account plan windows side by side.
+
+The usage collector (omarchy-agent-usage-zai) shares this state file and
+builds each account's record with `--account <label>`.
+"""
+
+from __future__ import annotations
+
+import argparse
+import getpass
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+PLATFORMS = {
+  "zai": "https://api.z.ai",
+  "zhipu": "https://open.bigmodel.cn",
+}
+QUOTA_PATH = "/api/monitor/usage/quota/limit"
+LIMIT_WINDOWS = {
+  (3, 5): "5h",
+  (6, 1): "week",
+}
+LIMIT_TYPES = {"CREDIT_LIMIT", "TOKENS_LIMIT"}
+
+# The idle provider slot a saved account attaches to. The catalog gives it
+# the full GLM model list and the same anthropic path as the coding-plan
+# provider, so an attached key is usable from the model picker immediately.
+ATTACH_PROVIDER_ID = "builtin:zai"
+ATTACH_BASE_URL = "https://api.z.ai/api/anthropic"
+ZCODE_PROVIDERS = {
+  # Iteration order is the display order in list/status: the OAuth login's
+  # key first, then the slots a second account can occupy.
+  "builtin:zai-coding-plan": ("Coding Plan", "zai"),
+  "builtin:zai": ("Z.AI API key", "zai"),
+  "builtin:zai-start-plan": ("Start plan", "zai"),
+  "builtin:bigmodel-coding-plan": ("BigModel Coding Plan", "zhipu"),
+  "builtin:bigmodel-start-plan": ("BigModel Start plan", "zhipu"),
+}
+
+STATE_PATH = Path(
+  os.environ.get("OMARCHY_ZAI_ACCOUNTS")
+  or (Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "omarchy" / "agents" / "zai.json")
+)
+ZCODE_CONFIG_PATH = Path(
+  os.environ.get("OMARCHY_ZCODE_CONFIG") or Path.home() / ".zcode" / "v2" / "config.json"
+)
+STATE_VERSION = 1
+
+SERVICE_TEMPLATE = """[Unit]
+Description=Write the Z.ai usage record for account {label} (omarchy.agents panel)
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/bin/sh -c 'exec %h/.local/bin/omarchy-agent-usage-zai --account {label} > "$${{XDG_STATE_HOME:-%h/.local/state}}/omarchy/agents/usage/.{record_id}.json.tmp"'
+ExecStartPost=/bin/sh -c 'exec mv "$${{XDG_STATE_HOME:-%h/.local/state}}/omarchy/agents/usage/.{record_id}.json.tmp" "$${{XDG_STATE_HOME:-%h/.local/state}}/omarchy/agents/usage/{record_id}.json"'
+"""
+
+TIMER_TEMPLATE = """[Unit]
+Description=Refresh the Z.ai usage record for account {label} every 15 minutes
+
+[Timer]
+# Matches the agents panel's own refreshIntervalSec default of 900.
+OnStartupSec=1min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+
+
+def fingerprint(api_key: str) -> str:
+  return hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
+
+
+def sanitize_label(label: str) -> str:
+  return "".join(ch if ch.isalnum() else "-" for ch in label.lower()).strip("-") or "account"
+
+
+def die(message: str) -> None:
+  print(f"omarchy-zai-account: {message}", file=sys.stderr)
+  raise SystemExit(1)
+
+
+# --------------------------------------------------------------------------
+# State file
+# --------------------------------------------------------------------------
+
+def read_state() -> dict[str, Any]:
+  try:
+    state = json.loads(STATE_PATH.read_text())
+  except (OSError, json.JSONDecodeError):
+    return {"version": STATE_VERSION, "accounts": {}}
+  if not isinstance(state, dict) or not isinstance(state.get("accounts"), dict):
+    return {"version": STATE_VERSION, "accounts": {}}
+  return state
+
+
+def write_state(state: dict[str, Any]) -> None:
+  STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+  handle_fd, tmp_name = tempfile.mkstemp(dir=STATE_PATH.parent, prefix=STATE_PATH.name + ".", suffix=".tmp")
+  tmp = Path(tmp_name)
+  try:
+    with os.fdopen(handle_fd, "w") as handle:
+      handle.write(json.dumps(state, indent=2, sort_keys=True) + "\n")
+    # The file holds live API keys; the collector reads it as this user only.
+    tmp.chmod(0o600)
+    tmp.replace(STATE_PATH)
+  except BaseException:
+    tmp.unlink(missing_ok=True)
+    raise
+
+
+def saved_account(state: dict[str, Any], label: str) -> dict[str, Any]:
+  entry = state["accounts"].get(label)
+  if not isinstance(entry, dict):
+    die(f"no account named '{label}'; run 'omarchy-zai-account list'")
+  return entry
+
+
+# --------------------------------------------------------------------------
+# ZCode config
+# --------------------------------------------------------------------------
+
+def read_zcode_config() -> dict[str, Any]:
+  try:
+    config = json.loads(ZCODE_CONFIG_PATH.read_text())
+  except (OSError, json.JSONDecodeError):
+    return {}
+  return config if isinstance(config, dict) else {}
+
+
+def write_zcode_config(config: dict[str, Any]) -> None:
+  ZCODE_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+  handle_fd, tmp_name = tempfile.mkstemp(dir=ZCODE_CONFIG_PATH.parent, prefix=ZCODE_CONFIG_PATH.name + ".", suffix=".tmp")
+  tmp = Path(tmp_name)
+  try:
+    with os.fdopen(handle_fd, "w") as handle:
+      handle.write(json.dumps(config, indent=2) + "\n")
+    # ZCode keeps this file world-readable; do not tighten it behind its back.
+    tmp.chmod(0o644)
+    tmp.replace(ZCODE_CONFIG_PATH)
+  except BaseException:
+    tmp.unlink(missing_ok=True)
+    raise
+
+
+def provider_options(config: dict[str, Any], provider_id: str) -> dict[str, Any]:
+  providers = config.get("provider") if isinstance(config.get("provider"), dict) else {}
+  entry = providers.get(provider_id)
+  if not isinstance(entry, dict):
+    return {}
+  options = entry.get("options")
+  if isinstance(options, str):
+    try:
+      options = json.loads(options)
+    except json.JSONDecodeError:
+      return {}
+  return options if isinstance(options, dict) else {}
+
+
+def provider_keys(config: dict[str, Any]) -> dict[str, str]:
+  """Return {provider_id: api_key} for every ZCode provider holding a key."""
+  found: dict[str, str] = {}
+  for provider_id in ZCODE_PROVIDERS:
+    key = str(provider_options(config, provider_id).get("apiKey") or "").strip()
+    if key:
+      found[provider_id] = key
+  return found
+
+
+def set_provider_key(config: dict[str, Any], api_key: str) -> None:
+  """Write (or clear) the attached key in the builtin:zai slot.
+
+  Attach mirrors how ZCode itself stores a working provider: options carry
+  the key, the entry is enabled. Detach restores the idle-slot shape the
+  config ships with: no key, no enabled flag, baseURL kept.
+  """
+  providers = config.get("provider")
+  if not isinstance(providers, dict):
+    die(f"{ZCODE_CONFIG_PATH}: unexpected 'provider' shape; nothing written")
+  entry = providers.setdefault(ATTACH_PROVIDER_ID, {})
+  if not isinstance(entry, dict):
+    die(f"{ZCODE_CONFIG_PATH}: provider {ATTACH_PROVIDER_ID} has an unexpected shape")
+  options = entry.get("options")
+  if isinstance(options, str):
+    try:
+      options = json.loads(options)
+    except json.JSONDecodeError:
+      options = {}
+  if not isinstance(options, dict):
+    options = {}
+  if api_key:
+    options["apiKey"] = api_key
+    options.setdefault("baseURL", ATTACH_BASE_URL)
+    entry["enabled"] = True
+  else:
+    # ZCode's own idle-slot shape: an empty apiKey, no enabled flag.
+    options["apiKey"] = ""
+    entry.pop("enabled", None)
+  entry["options"] = options
+  write_zcode_config(config)
+
+
+def attached_fingerprint() -> str:
+  return fingerprint(str(provider_options(read_zcode_config(), ATTACH_PROVIDER_ID).get("apiKey") or ""))
+
+
+def label_for_key(state: dict[str, Any], api_key: str, fallback: str) -> str:
+  fp = fingerprint(api_key)
+  for label, entry in state["accounts"].items():
+    if isinstance(entry, dict) and entry.get("fingerprint") == fp:
+      return label
+  return fallback
+
+
+# --------------------------------------------------------------------------
+# Quota probe (same endpoint the usage collector polls)
+# --------------------------------------------------------------------------
+
+def fetch_limits(api_key: str, platform: str) -> dict[str, Any]:
+  url = PLATFORMS.get(platform, PLATFORMS["zai"]) + QUOTA_PATH
+  request = urllib.request.Request(
+    url,
+    method="GET",
+    headers={
+      # This endpoint takes the raw token, not a Bearer prefix.
+      "Authorization": api_key,
+      "Accept-Language": "en-US,en",
+      "Content-Type": "application/json",
+    },
+  )
+  try:
+    with urllib.request.urlopen(request, timeout=15) as response:
+      body = json.load(response)
+  except urllib.error.HTTPError as error:
+    if error.code in (401, 403):
+      return {"status": "key rejected"}
+    return {"status": f"HTTP {error.code}"}
+  except (urllib.error.URLError, TimeoutError):
+    return {"status": "endpoint unreachable"}
+  except json.JSONDecodeError:
+    return {"status": "invalid response"}
+
+  data = body.get("data") if isinstance(body, dict) else None
+  if not isinstance(data, dict) or not isinstance(data.get("limits"), list):
+    msg = str(body.get("msg") or "").strip() if isinstance(body, dict) else ""
+    if "coding plan" in msg.lower():
+      return {"status": "no Coding Plan windows on this key"}
+    return {"status": msg[:60] or "limits unavailable"}
+
+  limits: dict[str, float | None] = {}
+  for item in data["limits"]:
+    if not isinstance(item, dict) or item.get("type") not in LIMIT_TYPES:
+      continue
+    window = LIMIT_WINDOWS.get((item.get("unit"), item.get("number")))
+    if not window:
+      continue
+    try:
+      limits[window] = float(item.get("percentage"))
+    except (TypeError, ValueError):
+      limits[window] = None
+  tier = str(data.get("level") or "").strip()
+  return {"tier": tier[:1].upper() + tier[1:].lower() if tier else "?", "limits": limits}
+
+
+# --------------------------------------------------------------------------
+# Accounts known to this machine
+# --------------------------------------------------------------------------
+
+def known_accounts(state: dict[str, Any]) -> list[dict[str, Any]]:
+  """Every distinct key this machine can reach, primary login first."""
+  config = read_zcode_config()
+  keys = provider_keys(config)
+  saved_fps = {
+    entry.get("fingerprint"): label
+    for label, entry in state["accounts"].items()
+    if isinstance(entry, dict)
+  }
+  accounts: list[dict[str, Any]] = []
+  seen: set[str] = set()
+
+  def push(api_key: str, fallback_label: str, source: str, platform: str) -> None:
+    if not api_key or api_key in seen:
+      return
+    seen.add(api_key)
+    fp = fingerprint(api_key)
+    accounts.append({
+      "label": saved_fps.get(fp) or fallback_label,
+      "fingerprint": fp,
+      "named": fp in saved_fps,
+      "source": source,
+      "platform": platform,
+      "apiKey": api_key,
+    })
+
+  for provider_id, (label, platform) in ZCODE_PROVIDERS.items():
+    push(keys.get(provider_id, ""), label, f"zcode:{provider_id}", platform)
+  for label, entry in sorted(state["accounts"].items()):
+    if isinstance(entry, dict) and entry.get("apiKey"):
+      push(str(entry["apiKey"]), label, f"saved:{label}", str(entry.get("platform") or "zai"))
+  return accounts
+
+
+# --------------------------------------------------------------------------
+# Per-account panel units
+# --------------------------------------------------------------------------
+
+def unit_dir() -> Path:
+  override = os.environ.get("OMARCHY_ZAI_UNIT_DIR")
+  if override:
+    return Path(override)
+  return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "systemd" / "user"
+
+
+def record_state_dir() -> Path:
+  return Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / "omarchy" / "agents" / "usage"
+
+
+def unit_names(label: str) -> tuple[str, str]:
+  safe = sanitize_label(label)
+  return f"omarchy-agent-usage-zai-{safe}.service", f"omarchy-agent-usage-zai-{safe}.timer"
+
+
+def systemctl(*args: str) -> bool:
+  if os.environ.get("OMARCHY_ZAI_UNIT_DIR"):
+    return False  # Test mode: write unit files, never touch the real bus.
+  if not shutil.which("systemctl"):
+    return False
+  result = subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True)
+  if result.returncode != 0:
+    print(f"omarchy-zai-account: systemctl {' '.join(args)} failed: {result.stderr.strip()}", file=sys.stderr)
+  return result.returncode == 0
+
+
+def ensure_units(label: str) -> None:
+  """Generate and enable the per-account service + timer pair."""
+  service_name, timer_name = unit_names(label)
+  record_id = f"zai-{sanitize_label(label)}"
+  directory = unit_dir()
+  directory.mkdir(parents=True, exist_ok=True)
+  service_path = directory / service_name
+  timer_path = directory / timer_name
+  service_path.write_text(SERVICE_TEMPLATE.format(label=label, record_id=record_id))
+  service_path.chmod(0o644)
+  timer_path.write_text(TIMER_TEMPLATE.format(label=label))
+  timer_path.chmod(0o644)
+  if systemctl("daemon-reload") or os.environ.get("OMARCHY_ZAI_UNIT_DIR"):
+    systemctl("enable", "--now", timer_name)
+    print(f"panel record: {record_id}.json via {timer_name}")
+
+
+def remove_units(label: str) -> None:
+  service_name, timer_name = unit_names(label)
+  systemctl("disable", "--now", timer_name)
+  directory = unit_dir()
+  for name in (service_name, timer_name):
+    try:
+      (directory / name).unlink()
+    except OSError:
+      pass
+  systemctl("daemon-reload")
+  try:
+    (record_state_dir() / f"zai-{sanitize_label(label)}.json").unlink()
+  except OSError:
+    pass
+
+
+def zcode_running() -> bool:
+  if not shutil.which("pgrep"):
+    return False
+  return any(
+    subprocess.run(["pgrep", "-x", name], capture_output=True).returncode == 0
+    for name in ("ZCode", "zcode")
+  )
+
+
+# --------------------------------------------------------------------------
+# Commands
+# --------------------------------------------------------------------------
+
+def cmd_list(_: argparse.Namespace) -> int:
+  state = read_state()
+  rows = known_accounts(state)
+  if not rows:
+    print("no keys found; add one with 'omarchy-zai-account add <label> [key]'")
+    return 0
+  attached_fp = attached_fingerprint()
+  # Named accounts whose key is nowhere on this machine (renamed, key moved).
+  for label, entry in sorted(state["accounts"].items()):
+    if isinstance(entry, dict) and not entry.get("apiKey") and entry.get("fingerprint") not in {row["fingerprint"] for row in rows}:
+      rows.append({
+        "label": label, "fingerprint": str(entry.get("fingerprint")), "named": True,
+        "source": "named only", "platform": str(entry.get("platform") or "zai"), "apiKey": "",
+      })
+
+  width = max(len(row["label"]) for row in rows) + 2
+  for row in rows:
+    marks = []
+    if row["fingerprint"] == attached_fp and attached_fp:
+      marks.append(f"attached to {ATTACH_PROVIDER_ID}")
+    if state.get("attached") == row["label"] and row["source"].startswith("saved"):
+      marks.append("state says attached")
+    print(f"{row['label']:<{width}} {row['fingerprint']}  {row['source']:<30} {'(' + ', '.join(marks) + ')' if marks else ''}")
+  return 0
+
+
+def cmd_add(args: argparse.Namespace) -> int:
+  state = read_state()
+  label = args.label
+  if not label or label != label.strip() or any(ch in label for ch in ":/"):
+    die(f"invalid label '{label}'")
+  api_key = args.key
+  if api_key == "-":
+    api_key = sys.stdin.readline().strip()
+  elif not api_key:
+    api_key = getpass.getpass(f"API key for '{label}' (input hidden): ").strip()
+  if not api_key or any(ch.isspace() for ch in api_key):
+    die("empty key or key with whitespace; nothing saved")
+  for other, entry in state["accounts"].items():
+    if isinstance(entry, dict) and entry.get("fingerprint") == fingerprint(api_key):
+      die(f"this key is already saved as '{other}'")
+  state["accounts"][label] = {
+    "fingerprint": fingerprint(api_key),
+    "apiKey": api_key,
+    "platform": args.platform,
+  }
+  write_state(state)
+  print(f"saved '{label}' ({fingerprint(api_key)}) in {STATE_PATH}")
+  print(f"next: omarchy-zai-account attach {label}")
+  return 0
+
+
+def cmd_label(args: argparse.Namespace) -> int:
+  state = read_state()
+  primary = provider_keys(read_zcode_config()).get("builtin:zai-coding-plan")
+  if not primary:
+    die("ZCode has no coding-plan key to name; log in to Z.ai once, or use 'add' to save a key")
+  state["accounts"][args.label] = {"fingerprint": fingerprint(primary), "platform": "zai"}
+  write_state(state)
+  print(f"named the current ZCode coding-plan key ({fingerprint(primary)}) as '{args.label}'")
+  return 0
+
+
+def cmd_remove(args: argparse.Namespace) -> int:
+  state = read_state()
+  saved_account(state, args.label)
+  del state["accounts"][args.label]
+  if state.get("attached") == args.label:
+    state.pop("attached", None)
+  write_state(state)
+  remove_units(args.label)
+  print(f"forgot '{args.label}' (a key already attached in ZCode stays there; run 'detach' to clear it)")
+  return 0
+
+
+def cmd_attach(args: argparse.Namespace) -> int:
+  state = read_state()
+  entry = saved_account(state, args.label)
+  api_key = str(entry.get("apiKey") or "")
+  if not api_key:
+    die(f"'{args.label}' has no saved key (it only names a key stored elsewhere)")
+  config = read_zcode_config()
+  if not config:
+    die(f"{ZCODE_CONFIG_PATH} missing or unreadable; nothing written")
+  already = str(provider_options(config, ATTACH_PROVIDER_ID).get("apiKey") or "") == api_key
+  if not already:
+    set_provider_key(config, api_key)
+  state["attached"] = args.label
+  write_state(state)
+  ensure_units(args.label)
+  if already:
+    print(f"'{args.label}' was already attached to {ATTACH_PROVIDER_ID}; ensured the panel units")
+  else:
+    print(f"attached '{args.label}' to {ATTACH_PROVIDER_ID}; pick its models in the ZCode model picker")
+  if zcode_running():
+    print("note: ZCode is running; it keeps its config in memory and may write it back.")
+    print("      If the provider does not show the key, quit ZCode and run 'sync'.")
+  return 0
+
+
+def cmd_detach(_: argparse.Namespace) -> int:
+  state = read_state()
+  config = read_zcode_config()
+  if not config:
+    die(f"{ZCODE_CONFIG_PATH} missing or unreadable; nothing written")
+  set_provider_key(config, "")
+  state.pop("attached", None)
+  write_state(state)
+  print(f"cleared the key from {ATTACH_PROVIDER_ID} (the account and its panel record stay)")
+  return 0
+
+
+def cmd_sync(_: argparse.Namespace) -> int:
+  state = read_state()
+  label = state.get("attached")
+  if not label:
+    print("nothing to sync; no account is attached (use 'attach <label>')")
+    return 0
+  api_key = str(saved_account(state, label).get("apiKey") or "")
+  config = read_zcode_config()
+  if not config:
+    die(f"{ZCODE_CONFIG_PATH} missing or unreadable; nothing written")
+  if str(provider_options(config, ATTACH_PROVIDER_ID).get("apiKey") or "") == api_key:
+    print(f"'{label}' is still attached; nothing to do")
+    return 0
+  set_provider_key(config, api_key)
+  print(f"re-attached '{label}' (ZCode had written the key out)")
+  return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+  state = read_state()
+  accounts = known_accounts(state)
+  if not accounts:
+    print("no keys found; add one with 'omarchy-zai-account add <label> [key]'")
+    return 0
+
+  attached_fp = attached_fingerprint()
+  width = max(len(row["label"]) for row in accounts) + 2
+  for row in accounts:
+    probe = fetch_limits(row["apiKey"], row["platform"])
+    if probe.get("status"):
+      print(f"{row['label']:<{width}} {probe['status']}")
+      continue
+    windows = probe.get("limits") or {}
+    parts = [
+      f"{name} {windows[name]:.0f}%" if windows.get(name) is not None else f"{name} ?"
+      for name in ("5h", "week")
+    ]
+    mark = "  [attached]" if row["fingerprint"] == attached_fp and attached_fp else ""
+    print(f"{row['label']:<{width}} {probe.get('tier') or '?':<10} {'  '.join(parts)}{mark}")
+  if args.verbose:
+    for row in accounts:
+      if row["fingerprint"] == attached_fp and attached_fp:
+        print(f"\nactive in ZCode ({ATTACH_PROVIDER_ID}): {row['label']}")
+  return 0
+
+
+def main() -> int:
+  parser = argparse.ArgumentParser(
+    description="Manage several Z.ai subscriptions without logging in and out",
+  )
+  sub = parser.add_subparsers(dest="command", required=True)
+
+  sub.add_parser("list", help="show known accounts and where each key lives")
+  add = sub.add_parser("add", help="save an account's console API key under a label")
+  add.add_argument("label")
+  add.add_argument("key", nargs="?", help="API key; pass '-' to read stdin, omit to be prompted")
+  add.add_argument("--platform", choices=sorted(PLATFORMS), default="zai")
+  label = sub.add_parser("label", help="name the key ZCode is currently logged in with")
+  label.add_argument("label")
+  remove = sub.add_parser("remove", help="forget a saved account and its panel units")
+  remove.add_argument("label")
+  attach = sub.add_parser("attach", help="put a saved key into ZCode's second Z.AI provider slot")
+  attach.add_argument("label")
+  sub.add_parser("detach", help="clear ZCode's second Z.AI provider slot")
+  sub.add_parser("sync", help="re-apply the attached key if ZCode wrote it out")
+  status = sub.add_parser("status", help="probe plan windows for every known key")
+  status.add_argument("-v", "--verbose", action="store_true")
+
+  args = parser.parse_args()
+  commands = {
+    "list": cmd_list,
+    "add": cmd_add,
+    "label": cmd_label,
+    "remove": cmd_remove,
+    "attach": cmd_attach,
+    "detach": cmd_detach,
+    "sync": cmd_sync,
+    "status": cmd_status,
+  }
+  return commands[args.command](args)
+
+
+if __name__ == "__main__":
+  raise SystemExit(main())
