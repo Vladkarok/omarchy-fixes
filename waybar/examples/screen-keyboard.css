@@ -1,8 +1,0 @@
-#custom-screen-keyboard {
-  min-width: 12px;
-  margin-right: 12px;
-}
-
-#custom-screen-keyboard.active {
-  color: #a55555;
-}

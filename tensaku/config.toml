@@ -1,9 +1,0 @@
-[general]
-annotation-size-factor = 2.0
-
-# Close the editor once the screenshot is out the door. Omarchy's tensaku-edit
-# binds Enter to save-to-clipboard (+ --save-after-copy), so close-on-copy is
-# what ends that flow; the other two cover Ctrl+S and Save As.
-close-on-copy = true
-close-on-save = true
-early-exit-save-as = true

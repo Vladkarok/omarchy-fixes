@@ -1,9 +1,0 @@
-#custom-calendar {
-  min-width: 12px;
-  margin-left: 7.5px;
-  margin-right: 7.5px;
-}
-
-#custom-calendar.active {
-  color: #a55555;
-}

@@ -1,9 +1,0 @@
-"custom/calendar": {
-  "exec": "python3 ~/.config/waybar/scripts/calendar-toggle.py status",
-  "return-type": "json",
-  "format": "{}",
-  "tooltip": true,
-  "on-click": "python3 ~/.config/waybar/scripts/calendar-toggle.py toggle",
-  "signal": 12,
-  "interval": 60
-}

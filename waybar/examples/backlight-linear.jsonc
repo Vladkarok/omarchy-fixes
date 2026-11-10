@@ -1,9 +1,0 @@
-"custom/brightness": {
-  "exec": "python3 ~/.config/waybar/scripts/brightness-status.py nvidia_wmi_ec_backlight",
-  "return-type": "json",
-  "on-click": "python3 ~/.config/waybar/scripts/brightness-toggle.py nvidia_wmi_ec_backlight",
-  "on-scroll-up": "omarchy-brightness-display +5% nvidia_wmi_ec_backlight",
-  "on-scroll-down": "omarchy-brightness-display 5%- nvidia_wmi_ec_backlight",
-  "tooltip": true,
-  "interval": 2
-}

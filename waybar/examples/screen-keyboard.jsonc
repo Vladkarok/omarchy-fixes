@@ -1,9 +1,0 @@
-"custom/screen-keyboard": {
-  "exec": "~/.config/waybar/scripts/screen-keyboard.sh status",
-  "return-type": "json",
-  "format": "{}",
-  "tooltip": true,
-  "on-click": "~/.config/waybar/scripts/screen-keyboard.sh toggle",
-  "signal": 11,
-  "interval": 10
-}
