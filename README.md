@@ -542,8 +542,8 @@ next to their target, and only when the real file is not there yet.
 `win11.xml` is not copied. The collector timers are installed but not
 enabled. Nothing under `/usr/share/omarchy` is touched.
 
-Run `omarchy update` after `local-patched-repo` and log out and back in. The
-run ends with a list of reminders. Still by hand:
+`local-patched-repo` also installs the patched `remmina` and `hyprpm`; log out
+and back in afterwards. The run ends with a list of reminders. Still by hand:
 
 - The Hyprland `monitors.lua`: `hw-monitors` on this laptop, otherwise
   Omarchy's own or one with the right scale.

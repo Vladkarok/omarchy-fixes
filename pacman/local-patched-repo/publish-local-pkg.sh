@@ -2,7 +2,7 @@
 
 # Publish locally built packages to the local-patched pacman repository.
 #
-#   publish-local-pkg.sh ~/Work/tmp/hyprland-4.2/{hyprland,hyprpm}-*.pkg.tar.zst
+#   publish-local-pkg.sh ~/Work/omarchy-fixes/hyprland/{hyprland,hyprpm}-*.pkg.tar.zst
 #   omarchy update
 #
 # Publish split packages together (hyprland with hyprpm). The next

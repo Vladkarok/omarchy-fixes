@@ -19,7 +19,12 @@ set -euo pipefail
 REPO=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 TS=$(date +%Y%m%d-%H%M%S)
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+SUDO_KEEPALIVE_PID=""
+cleanup() {
+  [[ -n $SUDO_KEEPALIVE_PID ]] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null
+  rm -rf "$TMP"
+}
+trap cleanup EXIT
 
 APPLY=0
 WITH_HW=0
@@ -64,7 +69,10 @@ while (($#)); do
       ONLY=$2
       shift
       ;;
-    --only=*) ONLY=${1#--only=} ;;
+    --only=*)
+      ONLY=${1#--only=}
+      [[ -n $ONLY ]] || { echo "--only needs a step list" >&2; exit 2; }
+      ;;
     -h | --help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -96,6 +104,7 @@ declare -A WANT=()
 if [[ -n $ONLY ]]; then
   IFS=',' read -ra picked <<<"$ONLY"
   for s in "${picked[@]}"; do
+    [[ -n $s ]] || continue # "hypr," or ",hypr"
     [[ -n ${KNOWN[$s]:-} ]] || { echo "Unknown step: $s (see --list)" >&2; exit 2; }
     if [[ $(step_field "${KNOWN[$s]}" 3) == hw ]] && ((!WITH_HW)); then
       echo "$s is a hardware step; add --with-hardware to run it." >&2
@@ -103,6 +112,11 @@ if [[ -n $ONLY ]]; then
     fi
     WANT[$s]=1
   done
+  if ((${#WANT[@]} == 0)); then
+    echo "--only got no step names: '$ONLY'" >&2
+    usage >&2
+    exit 2
+  fi
 fi
 
 SELECTED=()
@@ -126,13 +140,17 @@ say() { printf '%s\n' "$*"; }
 note() { NOTES+=("$*"); }
 quote() { printf '%q ' "$@"; }
 
-# run <cmd...>: print it; run it only with --apply.
+# run [--no-stdin] <cmd...>: print it; run it only with --apply.
+#   --no-stdin  stdin from /dev/null, so a prompt fails instead of waiting.
+#               sudo still asks for its password: it reads /dev/tty.
 run() {
+  local redir=""
+  [[ $1 == --no-stdin ]] && { redir="</dev/null"; shift; }
   if ((APPLY)); then
-    say "  run: $(quote "$@")"
-    "$@"
+    say "  run: $(quote "$@")$redir"
+    if [[ -n $redir ]]; then "$@" </dev/null; else "$@"; fi
   else
-    say "  would run: $(quote "$@")"
+    say "  would run: $(quote "$@")$redir"
   fi
 }
 
@@ -266,7 +284,7 @@ step_packages() {
   fi
   if ((${#aur_missing[@]})); then
     if command -v yay >/dev/null; then
-      run yay -S --needed --noconfirm --answerdiff None --answerclean None -- "${aur_missing[@]}"
+      run --no-stdin yay -S --needed --noconfirm --answerdiff None --answerclean None -- "${aur_missing[@]}"
     else
       say "  yay not found; install the AUR packages by hand"
     fi
@@ -281,7 +299,7 @@ step_packages() {
 
 step_local_patched_repo() {
   local d=$REPO/pacman/local-patched-repo hooks=~/.config/omarchy/hooks
-  local -a need_build=() unpublished=() f=()
+  local -a need_build=() unpublished=() f=() deps=() not_installed=()
   local name dir p
   shopt -s nullglob
   for name in hyprland hyprpm remmina; do
@@ -300,11 +318,24 @@ step_local_patched_repo() {
 
   if [[ " ${need_build[*]} " == *" hyprland "* || " ${need_build[*]} " == *" hyprpm "* ]]; then
     say "  no built hyprland/hyprpm package"
-    (cd "$REPO/hyprland" && run makepkg -s --noconfirm)
+    # -f: with only one of the split packages built, makepkg refuses
+    # ("A package has already been built") without it.
+    (cd "$REPO/hyprland" && run --no-stdin makepkg -sf --noconfirm)
   fi
   if [[ " ${need_build[*]} " == *" remmina "* ]]; then
     say "  no built remmina package"
-    (cd "$REPO/remmina" && run makepkg -df --noconfirm)
+    # makepkg -d skips the dependency check, so install depends and
+    # makedepends from the PKGBUILD first, minus gobject-introspection:
+    # remmina/README.md documents it as unneeded, which is why -d is used.
+    mapfile -t deps < <(cd "$REPO/remmina" && makepkg --printsrcinfo |
+      awk -F' = ' '/^[[:space:]]*(make)?depends = / { sub(/[<>=].*/, "", $2); print $2 }' |
+      grep -vx gobject-introspection | missing_pkgs)
+    if ((${#deps[@]})); then
+      run --no-stdin sudo pacman -S --needed --noconfirm --asdeps -- "${deps[@]}"
+    else
+      say "  unchanged  remmina build dependencies are installed"
+    fi
+    (cd "$REPO/remmina" && run --no-stdin makepkg -df --noconfirm)
   fi
 
   local configured=1
@@ -320,9 +351,21 @@ step_local_patched_repo() {
     ((configured)) || say "  repository snippet, hooks or pacman.conf Include not in place"
     ((${#unpublished[@]})) && say "  built but not published: ${unpublished[*]}"
     # install.sh does the sudo work itself and refuses no-new-privileges shells.
-    run bash "$d/install.sh"
-    note "Run 'omarchy update' to install the [local-patched] builds, then log out and back in."
+    run --no-stdin bash "$d/install.sh"
     CHANGED=1
+  fi
+
+  # repo-packages.txt leaves out remmina and hyprpm (they come from
+  # [local-patched]), and -Syu only upgrades what is installed, so install
+  # them here. -y reads the freshly published database; -u with it avoids a
+  # partial upgrade, and upgrades hyprland to the patched build too.
+  mapfile -t not_installed < <(printf '%s\n' remmina hyprpm | missing_pkgs)
+  if ((CHANGED)) || ((${#not_installed[@]})); then
+    ((${#not_installed[@]})) && say "  not installed: ${not_installed[*]}"
+    run --no-stdin sudo pacman -Syu --needed --noconfirm -- remmina hyprpm
+    note "Log out and back in to start the patched Hyprland."
+  else
+    say "  unchanged  remmina and hyprpm are installed"
   fi
   note "remmina/: the published build may trail extra (see README, 'Rebuild needed')."
 }
@@ -457,7 +500,7 @@ step_shell() {
     else
       say "  new        $dir"
       N_NEW=$((N_NEW + 1))
-      run git clone --depth 1 "$url" "$dir"
+      run --no-stdin env GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$url" "$dir"
     fi
   done
   local tools=() t
@@ -482,7 +525,7 @@ step_mise() {
   if ! command -v mise >/dev/null; then
     say "  mise not found; skipping mise install"
   elif ((CHANGED)) || ! mise where herdr >/dev/null 2>&1; then
-    run mise install
+    run --no-stdin mise install
   else
     say "  unchanged  mise tools from the global config are installed"
   fi
@@ -568,7 +611,7 @@ step_omarchy_shell() {
     else
       say "  new        plugin $id"
       N_NEW=$((N_NEW + 1))
-      run omarchy plugin add "$url" --yes
+      run --no-stdin omarchy plugin add "$url" --yes
     fi
   done
   for id in io.github.vladkarok.omabump io.github.vladkarok.oskar; do
@@ -592,7 +635,7 @@ step_omarchy_shell() {
   if [[ $current == neutral-dark ]]; then
     say "  unchanged  theme neutral-dark is current"
   else
-    run omarchy theme set neutral-dark
+    run --no-stdin omarchy theme set neutral-dark
   fi
 }
 
@@ -608,7 +651,7 @@ step_hw_voxtype() {
   CHANGED=0
   if [[ ! -e $unit ]]; then
     if command -v voxtype >/dev/null; then
-      run voxtype setup systemd
+      run --no-stdin voxtype setup systemd
     else
       say "  skipped    voxtype not installed"
       return 0
@@ -645,6 +688,9 @@ if ((${#sudo_steps[@]})); then
       exit 1
     fi
     sudo -v
+    # Keep the sudo timestamp fresh through long builds; cleanup() stops it.
+    while sleep 60; do sudo -n -v 2>/dev/null || exit 0; done &
+    SUDO_KEEPALIVE_PID=$!
   fi
 fi
 
