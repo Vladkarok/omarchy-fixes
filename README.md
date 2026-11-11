@@ -3,8 +3,8 @@
 Fixes and personal overrides for one Omarchy 4.x laptop (Arch, package-managed
 `omarchy-dev`, hybrid Intel/NVIDIA, 2560x1600 panel at scale 2, US + UA
 keyboard layouts). Each directory below says what it fixes, where its files go,
-and how to install them. The restore checklist at the end puts them in order
-for a fresh machine.
+and how to install them. `bootstrap.sh` (see "Bootstrap" near the end) runs them
+in order on a fresh machine.
 
 Commands assume you are in the repo root.
 
@@ -517,64 +517,67 @@ These live elsewhere and are referenced, not copied:
   bar plugin. Clone it and link it to
   `~/.config/omarchy/plugins/io.github.vladkarok.omabump`.
 
-## Restore checklist for a fresh Omarchy 4.x machine
+## Bootstrap a fresh Omarchy 4.x machine
 
-1. Install Omarchy 4.x and finish its first-run setup. Clone this repo.
-2. Install the packages: `repo-packages.txt` with pacman, then
-   `aur-packages.txt` with yay. Skim both first and drop what you no longer
-   use.
-3. Hyprland: copy `hypr/*.lua` and `hypr/hyprsunset.conf` to
-   `~/.config/hypr/`, then `hardware/hypr/monitors.lua` (adjust the scale on
-   other hardware). Run `hyprctl reload && hyprctl configerrors`.
-4. Copy the terminal configs, `environment.d/electron-wayland.conf`,
-   `pacman/makepkg.conf` and the shell files. Install the zsh plugins and theme.
-5. Build `hyprland/` and `remmina/` with makepkg, run
-   `pacman/local-patched-repo/install.sh`, then `omarchy update`. Log out and
-   back in.
-6. System files (sudo): `etc/sysctl.d/40-disable-ipv6.conf` if the network
-   still has no working IPv6, and on this laptop
-   `hardware/wifi/70-wifi-powersave-off.rules`.
-7. Omarchy shell: add the four third-party plugins, set up OSKar and omabump
-   from their repos, then restore `omarchy/shell/` and the `neutral-dark`
-   theme and select it. Add wallpapers to the theme's `backgrounds/`.
-8. Desktop overrides, after the apps themselves: `claude/`, `viber/`,
-   `remmina/`, `agterm/`, `applications/`, and `chatgpt/codex-flags.conf`.
-   Install the AnyDesk hook after AnyDesk. Copy the `local-bin/` scripts and
-   fill in `~/.config/rdp-connect.env`.
-9. Dictation: run `voxtype setup systemd`, then add
-   `hardware/voxtype/gpu.conf` (check the GPU index).
-10. Copy `mise/global-config.toml` to `~/.config/mise/config.toml`, remove the
-    pacman `herdr`, and run `mise install`.
-11. Set up snapper for `/home` (`snapper/`).
-12. Projects from other repositories: clone `lwupdate` to `~/Work/lwupdate`
-    for Last War, build the `omasnap` fork into `~/.local/bin/omasnap`, and
-    apply the `wine-thumbs` patches if needed.
-13. Optional, this laptop only: Looking Glass and the Windows VM
-    (`hardware/looking-glass/`). Build the matching client, fill the
-    placeholders in `win11.xml` and define the VM (add the kvmfr block for
-    Looking Glass), and join the `kvm` and `libvirt` groups.
-14. Optional: the `omarchy/` collectors and brightness fork. Put the Z.ai key in
-    `~/.config/omarchy/agents/zai.json` (mode 0600) and log in to Grok and ZCode
-    before enabling the timers. For the second Z.ai account run
-    `omarchy-zai-account add second` and `omarchy-zai-account attach second`.
-15. Things to check rather than copy:
-    - Idle and lock timings live in `~/.config/omarchy/shell.json`
-      (`idle.lock`, `idle.screensaver`). `hypridle` and `hyprlock` are not
-      installed on Omarchy 4, so their old config files have no effect; the
-      lock screen is the Lock Explorer plugin.
-    - fcitx5 broke Ctrl+C and Ctrl+V in the UA layout system-wide. If Omarchy
-      installs it again, expect that back.
-    - `omarchy-refresh-limine` replaces `/boot/limine.conf`. Re-add
-      `remember_last_entry: yes` afterwards.
-    - Do not put multi-line secrets in the empty-password GNOME keyring. It
-      stores them unescaped and the next daemon start fails to load the
-      keyring; store them base64-encoded on one line. If the keyring is ever
-      broken, fix it before opening a Chromium browser, which deletes cookies it
-      cannot decrypt.
-    - Take Omarchy's versions of git, tmux, fastfetch, btop and swayosd
-      config; the old copies were only stale defaults.
-    - Known unsolved: after resume the NumLock LED reads on but the numpad types
-      nothing until NumLock is toggled twice (hyprlock #680).
+Install Omarchy 4.x, finish its first-run setup, clone this repo, then:
+
+```bash
+./bootstrap.sh                   # dry run: prints every action, changes nothing
+./bootstrap.sh --apply           # do it (from a normal terminal, for sudo)
+./bootstrap.sh --list            # the steps
+./bootstrap.sh --only hypr,shell # some steps only
+./bootstrap.sh --with-hardware   # also the hw-* steps, for this laptop only
+```
+
+It runs the per-directory installs above in order: the sudo steps first
+(`packages`, `local-patched-repo`, `etc-sysctl`, `snapper`, and with
+`--with-hardware` `hw-wifi`, `hw-looking-glass`), then `hypr`, `terminals`,
+`shell`, `env`, `mise`, `applications`, `local-bin`, `omarchy-bin`,
+`omarchy-shell` and `hw-monitors`, `hw-voxtype`. It is safe to re-run. A
+target that matches the repo is left alone; one that differs is saved as
+`<target>.bak.<timestamp>` first. `~/.config/omarchy/shell.json` is only
+written when it is missing, because the shell rewrites it. Templates
+(`rdp-connect.env.example`, the Remmina examples) are copied as `*.example`
+next to their target, and only when the real file is not there yet.
+`win11.xml` is not copied. The collector timers are installed but not
+enabled. Nothing under `/usr/share/omarchy` is touched.
+
+Run `omarchy update` after `local-patched-repo` and log out and back in. The
+run ends with a list of reminders. Still by hand:
+
+- The Hyprland `monitors.lua`: `hw-monitors` on this laptop, otherwise
+  Omarchy's own or one with the right scale.
+- OSKar and omabump from their repos, and wallpapers in the theme's
+  `backgrounds/`.
+- Templates: `~/.config/rdp-connect.env`, Remmina's `remmina.pref` and
+  profile, `win11.xml` (see `hardware/looking-glass/`).
+- The `omarchy/` collectors: put the Z.ai key in
+  `~/.config/omarchy/agents/zai.json` (mode 0600), log in to Grok and ZCode,
+  then enable the timers. For the second Z.ai account run
+  `omarchy-zai-account add second` and `omarchy-zai-account attach second`.
+- Looking Glass: build the matching client, define the VM (add the kvmfr
+  block), restart libvirtd.
+- Projects from other repositories: clone `lwupdate` to `~/Work/lwupdate`
+  for Last War, build the `omasnap` fork into `~/.local/bin/omasnap`, and
+  apply the `wine-thumbs` patches if needed. agterm from its tarball.
+- Things to check rather than copy:
+  - Idle and lock timings live in `~/.config/omarchy/shell.json`
+    (`idle.lock`, `idle.screensaver`). `hypridle` and `hyprlock` are not
+    installed on Omarchy 4, so their old config files have no effect; the
+    lock screen is the Lock Explorer plugin.
+  - fcitx5 broke Ctrl+C and Ctrl+V in the UA layout system-wide. If Omarchy
+    installs it again, expect that back.
+  - `omarchy-refresh-limine` replaces `/boot/limine.conf`. Re-add
+    `remember_last_entry: yes` afterwards.
+  - Do not put multi-line secrets in the empty-password GNOME keyring. It
+    stores them unescaped and the next daemon start fails to load the
+    keyring; store them base64-encoded on one line. If the keyring is ever
+    broken, fix it before opening a Chromium browser, which deletes cookies it
+    cannot decrypt.
+  - Take Omarchy's versions of git, tmux, fastfetch, btop and swayosd
+    config; the old copies were only stale defaults.
+  - Known unsolved: after resume the NumLock LED reads on but the numpad types
+    nothing until NumLock is toggled twice (hyprlock #680).
 
 ## Checked and left out
 
