@@ -46,7 +46,7 @@ STEPS=(
   "mise|||mise/global-config.toml and mise install"
   "applications|||desktop overrides (claude, viber, agterm, remmina, applications/), Yaru-gray link, AnyDesk hook"
   "local-bin|||local-bin/ scripts to ~/.local/bin"
-  "omarchy-bin|||omarchy/bin and omarchy/systemd (usage collectors, brightness)"
+  "omarchy-bin|||omarchy/bin and omarchy/systemd (second Z.ai account usage, brightness)"
   "omarchy-shell|||shell plugins, omarchy/shell/, neutral-dark theme"
   "hw-monitors||hw|hardware/hypr/monitors.lua (scale 2)"
   "hw-voxtype||hw|hardware/voxtype GPU drop-in"
@@ -582,14 +582,12 @@ step_omarchy_bin() {
     place 644 "$f" ~/.config/systemd/user/"${f##*/}"
   done
   ((CHANGED)) && run systemctl --user daemon-reload
-  local t
-  for t in omarchy-agent-usage-grok.timer omarchy-agent-usage-zai.timer; do
-    if systemctl --user is-enabled --quiet "$t" 2>/dev/null; then
-      say "  unchanged  $t enabled"
-    else
-      note "$t is not enabled. Add the key/login first (README, omarchy/), then: systemctl --user enable --now $t"
-    fi
-  done
+  local t=omarchy-agent-usage-zai-second.timer
+  if systemctl --user is-enabled --quiet "$t" 2>/dev/null; then
+    say "  unchanged  $t enabled"
+  else
+    note "$t is not enabled. Save the key first (omarchy-zai-account add second), then: systemctl --user enable --now $t"
+  fi
   note "omarchy/patches/notification-toast-layer-crash.patch patches /usr/share/omarchy; bootstrap does not apply it."
 }
 

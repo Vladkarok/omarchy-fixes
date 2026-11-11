@@ -1,0 +1,8 @@
+[Unit]
+Description=Write the Z.ai usage record for account second (omarchy.agents panel)
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/bin/sh -c 'exec %h/.local/bin/omarchy-agent-usage-zai --account second > "$${XDG_STATE_HOME:-%h/.local/state}/omarchy/agents/usage/.zai-second.json.tmp"'
+ExecStartPost=/bin/sh -c 'exec mv "$${XDG_STATE_HOME:-%h/.local/state}/omarchy/agents/usage/.zai-second.json.tmp" "$${XDG_STATE_HOME:-%h/.local/state}/omarchy/agents/usage/zai-second.json"'
