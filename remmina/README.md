@@ -29,9 +29,9 @@ hotkey dead.
 
 ## Sharpness: native Wayland with a local patch (since 2026-10-12)
 
-The panel now runs at integer scale 2, and Remmina runs on native Wayland from a locally patched package (`PKGBUILD` + `remmina-hidpi-dynres.patch` here, built as `1:1.4.43-3.1`). Stock Remmina's dynamic resolution asks the server for the logical window size, so GTK doubles it: clean but huge. The patch requests logical size × GTK scale factor and draws it back at 1/factor, an exact pixel copy, and hands the remote pointer to GDK at the same scale. It fills the window at any size and in fullscreen. X11 is no longer needed, which also avoids Hyprland 0.56.2 never unhiding the cursor over XWayland windows.
+The panel now runs at integer scale 2, and Remmina runs on native Wayland from a locally patched package (`PKGBUILD` + `remmina-hidpi-dynres.patch` here, currently `1:1.4.43-5.1`, Arch's OpenSSL 4 rebuild `-5` plus the patch). Stock Remmina's dynamic resolution asks the server for the logical window size, so GTK doubles it: clean but huge. The patch requests logical size × GTK scale factor and draws it back at 1/factor, an exact pixel copy, and hands the remote pointer to GDK at the same scale. It fills the window at any size and in fullscreen. X11 is no longer needed, which also avoids Hyprland 0.56.2 never unhiding the cursor over XWayland windows.
 
-Rebuild after every Remmina update: `cd remmina && makepkg -df` (the `-d` skips the unneeded gobject-introspection makedepend), then `pacman -U` the result.
+Rebuild after every Remmina update, including Arch's pkgrel-only rebuilds (`-5` relinked against OpenSSL 4): diff `PKGBUILD` against Arch's, set `pkgrel=<arch pkgrel>.1`, then `cd remmina && makepkg -df` (the `-d` skips the unneeded gobject-introspection makedepend). Publish with `../pacman/local-patched-repo/publish-local-pkg.sh remmina-*-<ver>-x86_64.pkg.tar.zst`, which replaces the old build in [local-patched], and install it with `omarchy update` or `pacman -U` on the published file.
 
 ## Old: run it on XWayland, not Wayland (scale 1.6 era)
 
