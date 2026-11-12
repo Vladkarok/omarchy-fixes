@@ -6,11 +6,11 @@
 # in /etc/pacman.conf, so the -Syyuu that follows keeps the patched hyprland,
 # hyprpm and remmina instead of reinstalling Arch's builds.
 #
-# omarchy-refresh-pacman runs this after it copies the channel template over
-# /etc/pacman.conf and before `pacman -Syyuu`. That covers `omarchy channel
+# omarchy-refresh-pacman runs this after it copies the rendered pacman.conf and
+# mirrorlist into /etc and before `pacman -Syyuu`. That covers `omarchy channel
 # set`, `omarchy refresh pacman` and omarchy-reinstall-pkgs. The hook runs
-# with an empty sudo cache, and Omarchy's no-update wrapper turns `sudo`
-# into `sudo -N`, so every sudo call asks for the password. This hook makes
+# right after omarchy-refresh-pacman's own `sudo cp` of the rendered
+# pacman.conf, so its sudo call normally reuses that authorisation. It makes
 # one sudo call, and only when the Include line is missing.
 #
 # omarchy-hook only prints "Hook failed" and carries on, so a failed or

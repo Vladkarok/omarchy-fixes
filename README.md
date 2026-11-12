@@ -91,7 +91,7 @@ after, so they win.
   the night light stays as the panel left it.
 - `envs.lua`: `LIBVA_DRIVER_NAME=iHD` (Omarchy's `nvidia.lua` forces `nvidia`,
   which breaks video decode in Chromium apps on this hybrid laptop),
-  `SDL_VIDEODRIVER=wayland`, `OMASNAP_NOTIFY=0`, the screenshot directory.
+  `SDL_VIDEODRIVER=wayland`, `OMASNAP_NOTIFY=0`.
 - `bindings.lua`: rebinds through Omarchy's `o.rebind`, which unbinds first, so
   an Omarchy update cannot take a key back. Write the modifiers in the order
   Omarchy's own bind uses, or the unbind misses it and both binds fire. Desktop apps over web-app binds, emote,
@@ -127,24 +127,13 @@ CaskaydiaMono 12.
 | `ghostty/config` | `~/.config/ghostty/config` |
 | `kitty/kitty.conf` | `~/.config/kitty/kitty.conf` |
 
-### `environment.d/electron-wayland.conf`
+### `claude/claude-desktop-flags.conf`
 
-`ELECTRON_OZONE_PLATFORM_HINT=wayland` for every Electron app and launch path.
-Copy to `~/.config/environment.d/` and log out and back in. Discord is the
-exception: its desktop override passes `--ozone-platform=x11`, because its
-push-to-talk recorder only sees X11 key events.
-
-### `claude/com.anthropic.Claude.desktop`
-
-Claude Desktop entry with `--password-store=gnome-libsecret`, so its login
-survives restarts under Hyprland. Copy to `~/.local/share/applications/`.
+Adds `--password-store=gnome-libsecret` to Claude Desktop, so its login survives restarts under Hyprland. Omarchy's `/usr/bin/claude-desktop` launcher reads `~/.config/claude-desktop-flags.conf` on every launch (menu entry, `claude://` links, keybinding, bare command) and adds `--ozone-platform=wayland` itself. Copy to `~/.config/claude-desktop-flags.conf`.
 
 ### `chatgpt/codex-flags.conf`
 
-Wayland Ozone flags for the `openai-codex-desktop` app. Omarchy's
-`/usr/bin/chatgpt` launcher reads `~/.config/codex-flags.conf`; the env hint
-alone loses to the launcher's own `--ozone-platform=x11`. Copy to
-`~/.config/codex-flags.conf`.
+Wayland Ozone flags for the `openai-codex-desktop` app. Omarchy's `/usr/bin/chatgpt` launcher reads `~/.config/codex-flags.conf` and already requests Wayland on its own; the file keeps Wayland explicit and adds `WaylandWindowDecorations`. Copy to `~/.config/codex-flags.conf`.
 
 ### `viber/viber.desktop`
 
@@ -196,7 +185,7 @@ zsh with oh-my-zsh plugins and a Powerlevel10k prompt.
 The files configure but do not install. Check out
 `zsh-autosuggestions`, `fast-syntax-highlighting` (plugins) and `powerlevel10k`
 (theme) under `~/.oh-my-zsh/custom/` first, and install `zoxide`, `fzf`, `fnm`,
-`eza`, `bat`, `broot` and `nvim`. Aliases are skipped when `CLAUDECODE` is set.
+`eza`, `bat` and `nvim`. Aliases are skipped when `CLAUDECODE` is set.
 The grok, agterm, LM Studio, Oracle CLI and uv blocks are written by those
 installers and point at paths that exist only once they have run.
 
@@ -346,9 +335,11 @@ Desktop entry overrides and small launchers for `~/.local/share/applications/`.
 Install the app first; an override for an app that is not installed is just a
 broken menu entry.
 
+Stock Omarchy's `hypr/envs.lua` exports `ELECTRON_OZONE_PLATFORM_HINT=wayland`, so Electron apps run on native Wayland. That matters for the on-screen keyboard: it types with `wtype` (the Wayland virtual-keyboard protocol), and an XWayland window drops those keys. Discord stays on XWayland with `--ozone-platform=x11`, because its push-to-talk keybind recorder only sees X11 key events; the on-screen keyboard cannot type into Discord as a result.
+
 | File | What it changes |
 | --- | --- |
-| `discord.desktop` | `--ozone-platform=x11`, so Discord's push-to-talk recorder sees keys (see `environment.d/`) |
+| `discord.desktop` | `--ozone-platform=x11`, so Discord's push-to-talk recorder sees keys; keeps the package's `discord://` URL handling |
 | `ChatGPT-Second.desktop` | a second ChatGPT/Codex instance with its own `CODEX_HOME` (`~/.codex-second`) and user data dir (`~/.config/Codex-second`) |
 | `com.teamviewer.TeamViewer.desktop` | unsets `__GLX_VENDOR_LIBRARY_NAME`, so TeamViewer does not start on the NVIDIA GLX vendor |
 | `com.uploadedlobster.peek.desktop` | Peek on X11 (`GDK_BACKEND=x11`), with D-Bus activation off so the override is used |
@@ -396,22 +387,14 @@ Drop-in for the voxtype user service that pins Vulkan and GPU device index 1
 (`VOXTYPE_VULKAN_DEVICE=1`, `VOXTYPE_GPU_DEVICE=1`). The index depends on the
 GPU order; check it with `vulkaninfo --summary`.
 
+A fresh Omarchy 4.5 install makes Superwhisper the dictation backend. Omarchy's `omarchy-install-dictation-voxtype` writes the voxtype unit, enables it and switches the backend to voxtype, so install the drop-in first. It copies Omarchy's default `~/.config/voxtype/config.toml` only when that file is missing. This repo does not track a voxtype config, so a fresh machine starts from that default.
+
 ```bash
-voxtype setup systemd     # writes ~/.config/systemd/user/voxtype.service
 install -Dm644 hardware/voxtype/gpu.conf ~/.config/systemd/user/voxtype.service.d/gpu.conf
+omarchy-install-dictation-voxtype </dev/null   # unit, service, backend; reloads Hyprland
+omarchy-remove-dictation-superwhisper          # only if superwhisper-bin is installed
+# after later drop-in changes:
 systemctl --user daemon-reload && systemctl --user restart voxtype
-```
-
-#### `hardware/wifi/70-wifi-powersave-off.rules`
-
-udev rule that runs `iw ... set power_save off` on every new `wlan*`
-interface. Omarchy 4 now ships the same setting through NetworkManager
-(`/etc/NetworkManager/conf.d/omarchy-wifi-powersave.conf`), so this is a
-fallback. Needs sudo.
-
-```bash
-sudo install -Dm644 hardware/wifi/70-wifi-powersave-off.rules /etc/udev/rules.d/70-wifi-powersave-off.rules
-sudo udevadm control --reload
 ```
 
 #### `hardware/looking-glass/`
@@ -532,12 +515,12 @@ Install Omarchy 4.x, finish its first-run setup, clone this repo, then:
 
 It runs the per-directory installs above in order: the sudo steps first
 (`packages`, `local-patched-repo`, `etc-sysctl`, `snapper`, and with
-`--with-hardware` `hw-wifi`, `hw-looking-glass`), then `hypr`, `terminals`,
+`--with-hardware` `hw-looking-glass`), then `hypr`, `terminals`,
 `shell`, `env`, `mise`, `applications`, `local-bin`, `omarchy-bin`,
 `omarchy-shell` and `hw-monitors`, `hw-voxtype`. It is safe to re-run. A
 target that matches the repo is left alone; one that differs is saved as
 `<target>.bak.<timestamp>` first. `~/.config/omarchy/shell.json` is only
-written when it is missing, because the shell rewrites it. Templates
+written when it is missing, because the shell rewrites it; when it differs, the run says so and prints the command that takes the repo copy. Templates
 (`rdp-connect.env.example`, the Remmina examples) are copied as `*.example`
 next to their target, and only when the real file is not there yet.
 `win11.xml` is not copied. The collector timers are installed but not
@@ -567,8 +550,7 @@ and back in afterwards. The run ends with a list of reminders. Still by hand:
     (`idle.lock`, `idle.screensaver`). `hypridle` and `hyprlock` are not
     installed on Omarchy 4, so their old config files have no effect; the
     lock screen is the Lock Explorer plugin.
-  - fcitx5 broke Ctrl+C and Ctrl+V in the UA layout system-wide. If Omarchy
-    installs it again, expect that back.
+  - fcitx5 ships with Omarchy and runs. Keep `~/.config/fcitx5/profile` to the single `keyboard-us` item; adding the UA layout there breaks Ctrl+C and Ctrl+V in fcitx5 apps.
   - `omarchy-refresh-limine` replaces `/boot/limine.conf`. Re-add
     `remember_last_entry: yes` afterwards.
   - Do not put multi-line secrets in the empty-password GNOME keyring. It
@@ -576,7 +558,7 @@ and back in afterwards. The run ends with a list of reminders. Still by hand:
     keyring; store them base64-encoded on one line. If the keyring is ever
     broken, fix it before opening a Chromium browser, which deletes cookies it
     cannot decrypt.
-  - Take Omarchy's versions of git, tmux, fastfetch, btop and swayosd
+  - Take Omarchy's versions of git, tmux, fastfetch and btop
     config; the old copies were only stale defaults.
   - Known unsolved: after resume the NumLock LED reads on but the numpad types
     nothing until NumLock is toggled twice (hyprlock #680).
@@ -600,7 +582,7 @@ installer, so a fresh install recreates them:
   `omarchy-install-browser`.
 - `~/.config/hypr/hypridle.conf`, `hyprlock.conf`: left over from Omarchy 3;
   neither program is installed on 4.x.
-- `~/.config/systemd/user/voxtype.service`: written by `voxtype setup systemd`.
+- `~/.config/systemd/user/voxtype.service`: written by `voxtype setup systemd`, which `omarchy-install-dictation-voxtype` runs.
 - `~/.local/share/applications/anydesk.desktop`: written by the AnyDesk hook in
   `anydesk/`. `typora.desktop`, `windows-vm.desktop`, `battlenet.desktop`,
   `Docker.desktop`, the web apps and the 28-byte hidden entries: written by

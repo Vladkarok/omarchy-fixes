@@ -52,7 +52,7 @@ Two traps that produce a huge, soft picture:
 
 - `env = GDK_SCALE,2` in `hypr/monitors.conf` is inherited by everything launched from a
   shell or the app launcher. Combined with compositor scaling it applies scale twice.
-  The desktop file below pins `GDK_SCALE=1`.
+  The desktop file then pinned `GDK_SCALE=1`.
 - Passing `/scale-desktop:` and `/scale-device:` in the profile's extra FreeRDP
   arguments duplicates what `rdp_desktopScaleFactor` / `rdp_deviceScaleFactor` already
   send, and FreeRDP then ignores both. Leave `freerdp_params` empty. RDP only accepts
@@ -102,8 +102,7 @@ the upstream issue is a design decision, not something to fix here.
 
 ## Files
 
-- `org.remmina.Remmina.desktop` → `~/.local/share/applications/` — pins the launch
-  environment (`GDK_BACKEND=x11 GDK_SCALE=1 GDK_DPI_SCALE=1 GTK_THEME=Adwaita-dark`)
+- `org.remmina.Remmina.desktop` → `~/.local/share/applications/` — pins the launch environment (`GDK_BACKEND=wayland GTK_THEME=Adwaita-dark`)
 - `remmina.pref.example` → `~/.config/remmina/remmina.pref` — `secret` and
   `unlock_password` blanked
 - `rdp-profile.example.remmina` → `~/.local/share/remmina/` — credentials, host and

@@ -11,7 +11,7 @@
 audacity
 brave-bin
 celluloid
-claude-desktop              # desktop override in claude/
+claude-desktop              # flags file in claude/
 cursor-bin
 discord                     # desktop override in applications/
 firefox
@@ -58,6 +58,7 @@ lib32-pipewire
 lib32-pipewire-jack
 lib32-vulkan-intel
 mangohud
+moonlight-qt                # from Omarchy's gaming installer menu
 protontricks
 steam
 umu-launcher

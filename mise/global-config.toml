@@ -2,9 +2,6 @@
 # Live aqua registry: the registry baked into a mise release lags fixes such as
 # aqua-registry#62157 (crush cosign identity), which made omarchy-update fail.
 aqua.baked_registry = false
-minimum_release_age_excludes = ["claude", "codex"]
-
-[settings.upgrade]
 
 [tools]
 herdr = "latest"

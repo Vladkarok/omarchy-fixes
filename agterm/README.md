@@ -1,6 +1,6 @@
 # agterm-linux Install Notes
 
-Last updated: 2026-08-03
+Last updated: 2026-11-12
 
 [agterm-linux](https://github.com/melonamin/agterm-linux) (`linux-port` branch) is a
 Swift/GTK4 terminal that groups sessions into workspaces, with an `agtermctl` control
@@ -90,8 +90,6 @@ symlinks and desktop entry survive.
 
 Re-check the AUR occasionally; if `agterm-linux` or `agterm-bin` appears, switch to it.
 
-## Not Done
+## Agent integrations
 
-Preferences -> Integrations can also install Claude Code / Codex agent-status hooks and
-an `agterm` agent skill. Those write to `~/.claude/settings.json` and `~/.claude/skills/`
-and were deliberately left alone.
+The agterm agent-status hooks and the `agterm` skill (both offered in Preferences -> Integrations) are installed. The hook scripts live in `~/.config/agterm/agent-status/`; Claude Code calls them from `~/.claude/settings.json`, and Codex from `~/.codex/hooks.json` and `~/.codex/config.toml`. The skill is `~/.agents/skills/agterm/`, linked as `~/.claude/skills/agterm` since 2026-09-02.

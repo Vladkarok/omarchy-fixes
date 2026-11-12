@@ -3,7 +3,6 @@ alias ls="eza --icons=always"
 alias ll="eza -l --icons=always"
 alias la="eza -la --icons=always"
 alias cat="bat -p"
-alias br="broot"
 alias 'ipa'='ip -c a'
 alias 'ipr'='ip -c route'
 alias 'se'='sudoedit'

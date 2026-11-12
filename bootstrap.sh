@@ -37,19 +37,18 @@ STEPS=(
   "local-patched-repo|sudo||build hyprland/ and remmina/ if needed, then pacman/local-patched-repo/install.sh"
   "etc-sysctl|sudo||etc/sysctl.d/40-disable-ipv6.conf"
   "snapper|sudo||snapper config for /home and snapper-home.timer"
-  "hw-wifi|sudo|hw|hardware/wifi udev rule (Wi-Fi power save off)"
   "hw-looking-glass|sudo|hw|hardware/looking-glass: kvmfr, qemu.conf ACL, client launcher"
   "hypr|||hypr/*.lua and hyprsunset.conf to ~/.config/hypr"
   "terminals|||alacritty, foot, ghostty, kitty configs"
   "shell|||zshrc, zsh_aliases, p10k.zsh and the zsh plugins they source"
-  "env|||environment.d, pacman/makepkg.conf, chatgpt/codex-flags.conf"
+  "env|||pacman/makepkg.conf, chatgpt/codex-flags.conf, claude/claude-desktop-flags.conf"
   "mise|||mise/global-config.toml and mise install"
-  "applications|||desktop overrides (claude, viber, agterm, remmina, applications/), Yaru-gray link, AnyDesk hook"
+  "applications|||desktop overrides (viber, agterm, remmina, applications/), Yaru-gray link, AnyDesk hook"
   "local-bin|||local-bin/ scripts to ~/.local/bin"
   "omarchy-bin|||omarchy/bin and omarchy/systemd (second Z.ai account usage, brightness)"
   "omarchy-shell|||shell plugins, omarchy/shell/, neutral-dark theme"
   "hw-monitors||hw|hardware/hypr/monitors.lua (scale 2)"
-  "hw-voxtype||hw|hardware/voxtype GPU drop-in"
+  "hw-voxtype||hw|hardware/voxtype GPU drop-in, voxtype as the dictation backend"
 )
 
 usage() {
@@ -367,7 +366,6 @@ step_local_patched_repo() {
   else
     say "  unchanged  remmina and hyprpm are installed"
   fi
-  note "remmina/: the published build may trail extra (see README, 'Rebuild needed')."
 }
 
 step_etc_sysctl() {
@@ -398,13 +396,6 @@ step_snapper() {
   else
     run sudo systemctl enable --now snapper-home.timer
   fi
-}
-
-step_hw_wifi() {
-  CHANGED=0
-  place --sudo 644 "$REPO/hardware/wifi/70-wifi-powersave-off.rules" /etc/udev/rules.d/70-wifi-powersave-off.rules
-  ((CHANGED)) && run sudo udevadm control --reload
-  return 0
 }
 
 step_hw_looking_glass() {
@@ -504,7 +495,7 @@ step_shell() {
     fi
   done
   local tools=() t
-  for t in zoxide fzf fnm eza bat broot nvim; do
+  for t in zoxide fzf fnm eza bat nvim; do
     command -v "$t" >/dev/null || tools+=("$t")
   done
   ((${#tools[@]})) && note "zshrc expects these commands, not found: ${tools[*]}."
@@ -513,10 +504,16 @@ step_shell() {
 
 step_env() {
   CHANGED=0
-  place 644 "$REPO/environment.d/electron-wayland.conf" ~/.config/environment.d/electron-wayland.conf
-  ((CHANGED)) && note "environment.d changed: log out and back in."
   place 644 "$REPO/pacman/makepkg.conf" ~/.config/pacman/makepkg.conf
   place 644 "$REPO/chatgpt/codex-flags.conf" ~/.config/codex-flags.conf
+  place 644 "$REPO/claude/claude-desktop-flags.conf" ~/.config/claude-desktop-flags.conf
+  # Files earlier versions of this repo installed and Omarchy 4.5 made redundant.
+  local old
+  for old in ~/.config/environment.d/electron-wayland.conf "$APPS/com.anthropic.Claude.desktop" \
+    /etc/udev/rules.d/70-wifi-powersave-off.rules; do
+    [[ -e $old ]] && note "$old is no longer part of this repo (README: Omarchy covers it); remove it."
+  done
+  return 0
 }
 
 step_mise() {
@@ -534,7 +531,7 @@ step_mise() {
 step_applications() {
   local f
   CHANGED=0
-  for f in "$REPO/claude/com.anthropic.Claude.desktop" "$REPO/viber/viber.desktop" \
+  for f in "$REPO/viber/viber.desktop" \
     "$REPO/agterm/io.github.melonamin.agterm.desktop" "$REPO/remmina/org.remmina.Remmina.desktop" \
     "$REPO"/applications/*.desktop; do
     place 644 "$(render "$f")" "$APPS/${f##*/}"
@@ -618,7 +615,15 @@ step_omarchy_shell() {
   done
 
   # The shell rewrites shell.json; only seed it.
-  place --seed 600 "$REPO/omarchy/shell/shell.json" ~/.config/omarchy/shell.json
+  local sj=~/.config/omarchy/shell.json
+  place --seed 600 "$REPO/omarchy/shell/shell.json" "$sj"
+  # A kept copy may lack the tracked bar layout and plugin entries.
+  if [[ -e $sj ]] && ! cmp -s "$REPO/omarchy/shell/shell.json" "$sj"; then
+    local q_src q_dst
+    printf -v q_src %q "$REPO/omarchy/shell/shell.json"
+    printf -v q_dst %q "$sj"
+    note "$sj differs from the repo and was kept. Compare: diff -u $q_dst $q_src; to take the repo copy (drops what the shell wrote there, such as the clock birthYear): cp -a $q_dst $q_dst.bak.$TS && install -Dm600 $q_src $q_dst"
+  fi
   place 644 "$REPO/omarchy/shell/shell.toml" ~/.config/omarchy/shell.toml
   for f in "$REPO"/omarchy/themes/neutral-dark/*; do
     place 644 "$f" "$theme_dir/${f##*/}"
@@ -645,18 +650,35 @@ step_hw_monitors() {
 }
 
 step_hw_voxtype() {
-  local unit=~/.config/systemd/user/voxtype.service
+  local unit=~/.config/systemd/user/voxtype.service backend=""
   CHANGED=0
-  if [[ ! -e $unit ]]; then
-    if command -v voxtype >/dev/null; then
-      run --no-stdin voxtype setup systemd
-    else
-      say "  skipped    voxtype not installed"
-      return 0
-    fi
+  if ! command -v voxtype >/dev/null; then
+    say "  skipped    voxtype not installed"
+    return 0
   fi
+  # Drop-in first, so the stock installer starts the service with it.
   place 644 "$REPO/hardware/voxtype/gpu.conf" ~/.config/systemd/user/voxtype.service.d/gpu.conf
-  if ((CHANGED)); then
+  if command -v omarchy-default-dictation >/dev/null; then
+    backend=$(omarchy-default-dictation 2>/dev/null) || true
+  else
+    backend=unknown
+  fi
+  if [[ $backend == voxtype && -e $unit ]]; then
+    say "  unchanged  dictation backend is voxtype"
+  elif command -v omarchy-install-dictation-voxtype >/dev/null; then
+    # Fresh 4.5 installs default to Superwhisper. The stock installer writes
+    # the unit, enables it and switches the backend with omarchy-dictation-use.
+    # It downloads a model, so a failure must not stop the remaining steps.
+    run --no-stdin omarchy-install-dictation-voxtype ||
+      note "omarchy-install-dictation-voxtype failed; run it again by hand."
+  else
+    [[ -e $unit ]] || run --no-stdin voxtype setup systemd
+    [[ $backend == unknown ]] ||
+      note "No omarchy-install-dictation-voxtype on this Omarchy; select voxtype as the dictation backend by hand."
+  fi
+  pacman -Q superwhisper-bin >/dev/null 2>&1 &&
+    note "superwhisper-bin is installed; remove it with: omarchy-remove-dictation-superwhisper"
+  if ((CHANGED)) && { ((!APPLY)) || [[ -e $unit ]]; }; then
     run systemctl --user daemon-reload
     run systemctl --user restart voxtype
   fi
