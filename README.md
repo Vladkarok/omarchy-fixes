@@ -40,7 +40,7 @@ then `omarchy update`.
 
 ### `hyprland/`
 
-Omarchy's hyprland 0.57.1-2 recipe rebuilt as `0.57.1-2.1` with two local patches:
+Omarchy's hyprland 0.57.2-2 recipe rebuilt as `0.57.2-2.1` with two local patches:
 
 - `0001-hyprland-seat-keyboard-v8-core.patch`: keeps the keyboard layout and
   modifiers consistent across keyboards on the seat.
@@ -72,9 +72,8 @@ override, the tray-icon fix and example config. Details in
   domains are blanked; fill them in with Remmina closed.
 - Tray icon: `ln -sfn /usr/share/icons/Yaru-dark ~/.local/share/icons/Yaru-gray`.
 
-**Rebuild needed.** The published build is `1:1.4.43-4.1`, and `extra` now
-ships `1:1.4.43-5`, which `[local-patched]` hides. Rebase the PKGBUILD on
-extra's `-5`, set `pkgrel=5.1`, rebuild, and publish it.
+The published build is `1:1.4.43-5.1`, on top of `extra`'s `1:1.4.43-5`. The
+`20-warn-shadowed-local-pkgs` hook warns when `extra` moves ahead of it.
 
 ### `hypr/`
 
@@ -93,8 +92,9 @@ after, so they win.
 - `envs.lua`: `LIBVA_DRIVER_NAME=iHD` (Omarchy's `nvidia.lua` forces `nvidia`,
   which breaks video decode in Chromium apps on this hybrid laptop),
   `SDL_VIDEODRIVER=wayland`, `OMASNAP_NOTIFY=0`, the screenshot directory.
-- `bindings.lua`: rebinds through a local `rebind()` that unbinds first, so an
-  Omarchy update cannot take a key back. Desktop apps over web-app binds, emote,
+- `bindings.lua`: rebinds through Omarchy's `o.rebind`, which unbinds first, so
+  an Omarchy update cannot take a key back. Write the modifiers in the order
+  Omarchy's own bind uses, or the unbind misses it and both binds fire. Desktop apps over web-app binds, emote,
   lid close, a `SUPER + F12` passthrough submap for RDP and VM guests, tab
   reordering, keycode-based clipboard binds for the UA layout, `SUPER + SHIFT + Z`
   for ZCode, Discord push-to-talk on the backtick keycode, and the old dictation
