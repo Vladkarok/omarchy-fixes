@@ -224,6 +224,9 @@ collectors with timers, written before Omarchy had any; they raced the
 packaged ones for the same files and were removed. The stock Z.ai collector
 does not read ZCode's login, so the primary account needs its key as
 `apiKey` in `~/.config/omarchy/agents/zai.json` or as `ZAI_API_KEY`.
+On this machine it is a copy of ZCode's `builtin:zai-coding-plan` key from
+`~/.zcode/v2/config.json`; copy it again if the panel reports a rejected key
+after a new ZCode login.
 
 - `bin/omarchy-agent-usage-zai` with
   `systemd/omarchy-agent-usage-zai-second.{service,timer}`: usage for a second
