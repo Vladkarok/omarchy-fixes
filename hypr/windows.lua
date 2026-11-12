@@ -1,9 +1,8 @@
 -- Personal window rules. Omarchy's defaults load first, these override them.
 
--- Keep the focused window fully opaque, leave Omarchy's slight fade on the rest.
--- Same tag rule the default sets at the end of default/hypr/windows.lua, so it
--- has to be restated here to win; the pair is "<active> <inactive>".
-o.window({ tag = "default-opacity" }, { opacity = "1 0.96" })
+-- Keep a focused terminal (and the other apps Omarchy makes transparent) fully
+-- opaque instead of o.transparent_window's 0.985; the pair is "<active> <inactive>".
+o.window({ tag = "transparent-window" }, { opacity = "1 0.96" })
 
 -- Chat apps all live on workspace 1 as one tabbed group: "set" opens each as a
 -- group, and Hyprland's group.auto_group (on by default) merges the next one

@@ -1,2 +1,0 @@
-# Disable WiFi power management
-ACTION=="add", SUBSYSTEM=="net", KERNEL=="wlan*", RUN+="/usr/bin/iw dev $name set power_save off"
