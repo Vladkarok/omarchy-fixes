@@ -23,8 +23,8 @@ The tarball beat the AppImage here because:
   `~/.local/bin/agtermctl` from one. The tarball can.
 - 53 MB vs 79 MB, and no FUSE mount on launch.
 
-Host deps all satisfied: glibc 2.44 (needs >= 2.39), gtk4 4.22.4, libadwaita 1.9.2,
-libepoxy 1.5.10. `ldd` against the bundled `lib/` resolves everything.
+Host deps all satisfied (checked 2026-11-12): glibc 2.44 (needs >= 2.39), gtk4 4.24.1,
+libadwaita 1.10.0, libepoxy 1.5.10. `ldd` against the bundled `lib/` resolves everything.
 
 ## Installed Files
 

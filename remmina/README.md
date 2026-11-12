@@ -1,24 +1,24 @@
 # Remmina on Omarchy
 
-RDP against a Wayland/Hyprland host on a fractionally scaled panel (eDP-2, 2560x1600,
-`scale=1.6`). Two problems worth writing down: Alt+Tab never reaching the guest, and a
-blurry, oversized remote desktop.
+RDP against a Wayland/Hyprland host on the 2560x1600 panel (eDP-2), at integer scale 2
+since 2026-10-12 and `scale=1.6` before that. Two problems worth writing down: Alt+Tab
+never reaching the guest, and a blurry, oversized remote desktop.
 
 ## Alt+Tab (and other guest shortcuts)
 
-Not a Remmina problem. Omarchy binds `ALT, TAB` to `cyclenext`
-(`~/.local/share/omarchy/default/hypr/bindings/tiling.conf`), and Hyprland consumes a
+Not a Remmina problem. Omarchy binds `ALT + TAB` to `hl.dsp.window.cycle_next()`
+(`/usr/share/omarchy/default/hypr/bindings/tiling.lua`), and Hyprland consumes a
 bound key before the client ever sees it — no keyboard grab, on X11 or Wayland, can win
 against that.
 
 Fix is a Hyprland passthrough submap, which disables every bind while active. See the
-block at the end of [../hypr/bindings.conf](../hypr/bindings.conf):
+`SUPER + F12` block in [../hypr/bindings.lua](../hypr/bindings.lua):
 
-```
-bind = SUPER, F12, submap, passthrough
-submap = passthrough
-bind = SUPER, F12, submap, reset
-submap = reset
+```lua
+o.rebind("SUPER + F12", "Guest shortcut passthrough", hl.dsp.submap("passthrough"))
+hl.define_submap("passthrough", function()
+  hl.bind("SUPER + F12", hl.dsp.submap("reset"), { description = "Exit guest shortcut passthrough" })
+end)
 ```
 
 `SUPER + F12` toggles it both ways; `hyprctl submap` shows the current state.

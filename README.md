@@ -117,8 +117,9 @@ hyprctl reload && hyprctl configerrors
 ### Terminals: `alacritty/`, `foot/`, `ghostty/`, `kitty/`
 
 Make Ctrl+C and Ctrl+V work in the UA layout by sending them as C0 bytes and
-matching copy and paste by physical key. kitty also sets the font to
-CaskaydiaMono 12.
+matching copy and paste by physical key. They also set the font:
+CaskaydiaMono 8 in alacritty and ghostty, CaskaydiaMono 12 in kitty and
+JetBrainsMono 8 in foot (Omarchy's own configs use JetBrainsMono 9).
 
 | File | Goes to |
 | --- | --- |
@@ -523,8 +524,8 @@ target that matches the repo is left alone; one that differs is saved as
 written when it is missing, because the shell rewrites it; when it differs, the run says so and prints the command that takes the repo copy. Templates
 (`rdp-connect.env.example`, the Remmina examples) are copied as `*.example`
 next to their target, and only when the real file is not there yet.
-`win11.xml` is not copied. The collector timers are installed but not
-enabled. Nothing under `/usr/share/omarchy` is touched.
+`win11.xml` is not copied. The `zai-second` collector timer is installed but
+not enabled. Nothing under `/usr/share/omarchy` is touched.
 
 `local-patched-repo` also installs the patched `remmina` and `hyprpm`; log out
 and back in afterwards. The run ends with a list of reminders. Still by hand:
