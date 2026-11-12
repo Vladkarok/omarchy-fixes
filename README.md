@@ -236,9 +236,6 @@ does not read ZCode's login, so the primary account needs its key as
   `builtin:zai` provider and generates an `omarchy-agent-usage-zai-<label>`
   service and timer (the `second` pair is the one tracked here). Also `list`,
   `label`, `status`, `detach`, `sync`, `remove`.
-- `bin/omarchy-brightness-display`: brightness with a gamma 2.2 curve and a 5%
-  floor for `nvidia_wmi_ec_backlight`. It shadows Omarchy's command because
-  `~/.local/bin` comes first in Hyprland's PATH.
 - `patches/notification-toast-layer-crash.patch`: fixes omarchy-shell aborting
   when an image notification is shown during a scale change
   ([omacom/omarchy#16937](https://github.com/omacom/omarchy/issues/16937)).

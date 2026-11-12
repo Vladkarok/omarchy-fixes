@@ -45,7 +45,7 @@ STEPS=(
   "mise|||mise/global-config.toml and mise install"
   "applications|||desktop overrides (viber, agterm, remmina, applications/), Yaru-gray link, AnyDesk hook"
   "local-bin|||local-bin/ scripts to ~/.local/bin"
-  "omarchy-bin|||omarchy/bin and omarchy/systemd (second Z.ai account usage, brightness)"
+  "omarchy-bin|||omarchy/bin and omarchy/systemd (second Z.ai account usage)"
   "omarchy-shell|||shell plugins, omarchy/shell/, neutral-dark theme"
   "hw-monitors||hw|hardware/hypr/monitors.lua (scale 2)"
   "hw-voxtype||hw|hardware/voxtype GPU drop-in, voxtype as the dictation backend"
@@ -575,6 +575,10 @@ step_omarchy_bin() {
   for f in "$REPO"/omarchy/bin/*; do
     place 755 "$f" "$BIN/${f##*/}"
   done
+  # Dropped from this repo: it shadowed Omarchy's command and broke the Monitor
+  # panel's brightness slider.
+  [[ -e $BIN/omarchy-brightness-display ]] &&
+    note "$BIN/omarchy-brightness-display is no longer part of this repo and shadows Omarchy's command; remove it."
   for f in "$REPO"/omarchy/systemd/*; do
     place 644 "$f" ~/.config/systemd/user/"${f##*/}"
   done
