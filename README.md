@@ -97,8 +97,8 @@ after, so they win.
   Omarchy's own bind uses, or the unbind misses it and both binds fire. Desktop apps over web-app binds, emote,
   lid close, a `SUPER + F12` passthrough submap for RDP and VM guests, tab
   reordering, keycode-based clipboard binds for the UA layout, `SUPER + SHIFT + Z`
-  for ZCode, Discord push-to-talk on the backtick keycode, and the old dictation
-  keys.
+  for ZCode, Discord push-to-talk on the backtick keycode, and the old F9 dictation
+  push-to-talk key.
 - `windows.lua`: chat apps as one tabbed group on workspace 1, Last War and its
   launcher on workspace 5 (with `no_max_size`, needed since Hyprland 0.57),
   `render_unfocused` so Proton games keep loading while their workspace is

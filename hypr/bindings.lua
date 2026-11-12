@@ -111,9 +111,8 @@ end)
 -- the Ukrainian layout too, and non-consuming so ` still types in other apps.
 o.rebind("code:49", "Discord push-to-talk", hl.dsp.global("discord:discord-push-to-talk"), { non_consuming = true })
 
--- Dictation keys from before Alt + Space and Right Alt became the defaults.
--- Remove these lines to give the keys back to applications.
+-- F9 push-to-talk from before Alt + Space and Right Alt became the defaults.
+-- Remove these lines to give F9 back to applications.
 if o.dictation_installed and o.dictation_installed() then
-  o.rebind("SUPER + CTRL + X", "Toggle dictation", "omarchy-dictation toggle")
   o.bind_hold("F9", "Start dictation (push-to-talk)", "omarchy-dictation start", "Stop dictation (push-to-talk)", "omarchy-dictation stop")
 end
