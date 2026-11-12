@@ -17,9 +17,7 @@ discord                     # desktop override in applications/
 firefox
 gimp
 gnome-clocks
-kdenlive
 lmstudio-bin
-obs-studio
 openai-codex-desktop        # flags in chatgpt/
 peek                        # desktop override in applications/
 seahorse                    # GNOME keyring editor
@@ -28,7 +26,6 @@ signal-desktop
 spotify
 telegram-desktop
 typora
-xournalpp
 zed
 zen-browser-bin
 
@@ -83,7 +80,6 @@ fnm                         # used by shell/zshrc
 git-filter-repo
 github-cli
 glab
-lazydocker
 llvm
 micro
 neovim
