@@ -511,7 +511,9 @@ step_env() {
   local old
   for old in ~/.config/environment.d/electron-wayland.conf "$APPS/com.anthropic.Claude.desktop" \
     /etc/udev/rules.d/70-wifi-powersave-off.rules; do
-    [[ -e $old ]] && note "$old is no longer part of this repo (README: Omarchy covers it); remove it."
+    # Claude Desktop writes its own entry to the same path at startup.
+    [[ -e $old ]] && ! grep -qs '^X-Claude-Generated=true' "$old" &&
+      note "$old is no longer part of this repo (README: Omarchy covers it); remove it."
   done
   return 0
 }
