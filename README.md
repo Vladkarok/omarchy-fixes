@@ -240,11 +240,6 @@ after a new ZCode login.
   `builtin:zai` provider and generates an `omarchy-agent-usage-zai-<label>`
   service and timer (the `second` pair is the one tracked here). Also `list`,
   `label`, `status`, `detach`, `sync`, `remove`.
-- `patches/notification-toast-layer-crash.patch`: fixes omarchy-shell aborting
-  when an image notification is shown during a scale change
-  ([omacom/omarchy#16937](https://github.com/omacom/omarchy/issues/16937)).
-  Apply with `sudo patch -d /usr/share/omarchy -p1 < omarchy/patches/notification-toast-layer-crash.patch`;
-  every `omarchy-dev` update reverts it.
 
 ```bash
 for f in omarchy/bin/*; do install -Dm755 "$f" ~/.local/bin/"${f##*/}"; done

@@ -591,7 +591,6 @@ step_omarchy_bin() {
   else
     note "$t is not enabled. Save the key first (omarchy-zai-account add second), then: systemctl --user enable --now $t"
   fi
-  note "omarchy/patches/notification-toast-layer-crash.patch patches /usr/share/omarchy; bootstrap does not apply it."
 }
 
 step_omarchy_shell() {
