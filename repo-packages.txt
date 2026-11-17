@@ -116,11 +116,8 @@ wireshark-cli
 ex-vi-compat
 flatpak
 hyprshot
-kvantum-qt5
-kvantum-theme-materia
 libqalculate
 libva-utils
-materia-gtk-theme
 noto-fonts-extra
 papirus-icon-theme
 qt5-wayland

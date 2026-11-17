@@ -61,16 +61,15 @@ Build output is gitignored. Publish `hyprland-*.pkg.tar.zst` and
 ### `remmina/`
 
 Remmina on native Wayland with a HiDPI dynamic-resolution patch, a desktop
-override, the tray-icon fix and example config. Details in
+override and example config. Details in
 [remmina/README.md](remmina/README.md).
 
 - `PKGBUILD`, `remmina-hidpi-dynres.patch`: build with `cd remmina && makepkg -df`.
 - `org.remmina.Remmina.desktop` → `~/.local/share/applications/`
-  (`GDK_BACKEND=wayland`, `GTK_THEME=Adwaita-dark`).
+  (`GDK_BACKEND=wayland`).
 - `remmina.pref.example` → `~/.config/remmina/remmina.pref`, and
   `rdp-profile.example.remmina` → `~/.local/share/remmina/`. Secrets, hosts and
   domains are blanked; fill them in with Remmina closed.
-- Tray icon: `ln -sfn /usr/share/icons/Yaru-dark ~/.local/share/icons/Yaru-gray`.
 
 The published build is `1:1.4.44-1.1`, on top of `extra`'s `1:1.4.44-1`. The
 `20-warn-shadowed-local-pkgs` hook warns when `extra` moves ahead of it.
@@ -270,9 +269,10 @@ The Omarchy shell's own settings and a custom theme.
   entries only work once the plugins are installed (below).
 - `shell.toml`: shell font base size 11.
 - `neutral-dark`: grey surfaces with equal RGB channels, hue-correct ANSI
-  colours, `Yaru-dark` icons (part of the Remmina tray fix) and the GitHub Dark
-  VS Code theme. The three wallpapers in its `backgrounds/` are not in the repo;
-  add your own images there.
+  colours and the GitHub Dark VS Code theme. Icons come from Omarchy: Adwaita
+  for GTK and Qt, and the icon set picked in the theme switcher for its own
+  apps. The three wallpapers in its `backgrounds/` are not in the repo; add your
+  own images there.
 
 Install the third-party plugins before restoring `shell.json`:
 

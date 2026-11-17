@@ -43,7 +43,7 @@ STEPS=(
   "shell|||zshrc, zsh_aliases, p10k.zsh and the zsh plugins they source"
   "env|||pacman/makepkg.conf, chatgpt/codex-flags.conf, claude/claude-desktop-flags.conf"
   "mise|||mise/global-config.toml and mise install"
-  "applications|||desktop overrides (viber, agterm, remmina, applications/), Yaru-gray link, AnyDesk hook"
+  "applications|||desktop overrides (viber, agterm, remmina, applications/), AnyDesk hook"
   "local-bin|||local-bin/ scripts to ~/.local/bin"
   "omarchy-bin|||omarchy/bin and omarchy/systemd (second Z.ai account usage)"
   "omarchy-shell|||shell plugins, omarchy/shell/, neutral-dark theme"
@@ -539,9 +539,6 @@ step_applications() {
     place 644 "$(render "$f")" "$APPS/${f##*/}"
   done
   ((CHANGED)) && run update-desktop-database "$APPS"
-
-  # Remmina tray icon: Omarchy themes name Yaru-gray, which nothing ships.
-  link /usr/share/icons/Yaru-dark ~/.local/share/icons/Yaru-gray
 
   # Remmina templates: copied next to the real files, never over them.
   example "$REPO/remmina/remmina.pref.example" ~/.config/remmina/remmina.pref.example \
