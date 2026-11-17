@@ -72,7 +72,7 @@ override, the tray-icon fix and example config. Details in
   domains are blanked; fill them in with Remmina closed.
 - Tray icon: `ln -sfn /usr/share/icons/Yaru-dark ~/.local/share/icons/Yaru-gray`.
 
-The published build is `1:1.4.43-5.1`, on top of `extra`'s `1:1.4.43-5`. The
+The published build is `1:1.4.44-1.1`, on top of `extra`'s `1:1.4.44-1`. The
 `20-warn-shadowed-local-pkgs` hook warns when `extra` moves ahead of it.
 
 ### `hypr/`
