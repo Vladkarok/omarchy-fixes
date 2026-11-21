@@ -9,11 +9,17 @@
 #     (rebuild with the patches on top of it, then publish-local-pkg.sh);
 #   - the installed version is not the published one;
 #   - pacman.conf lost the Include line (the pre-refresh-pacman hook failed
-#     or was cancelled during a channel switch).
+#     or was cancelled during a channel switch);
+#   - a package held back by IgnorePkg (custom-repos.conf) has a build newer
+#     than the one it was held back from, so it may be worth trying.
 # It only reads pacman's configuration and databases and needs no sudo.
 
 REPO=local-patched
 SNIPPET=/etc/pacman.d/custom-repos.conf
+
+# Held-back package and the build it was held back from (see IgnorePkg in
+# custom-repos.conf). The other Mesa packages share mesa's version.
+declare -A HELD_FROM=([mesa]=1:26.3.1-2)
 
 warn() {
   echo -e "\e[33m\nLocally patched packages need attention:\e[0m"
@@ -40,9 +46,15 @@ while read -r repo name version _; do
   fi
 done < <(pacman -Sl 2>/dev/null)
 
-((${#ours[@]})) || exit 0
-
 messages=()
+ignored=" $(pacman-conf IgnorePkg 2>/dev/null | tr '\n' ' ') "
+for name in "${!HELD_FROM[@]}"; do
+  other=${newest[$name]:-}
+  if [[ $ignored == *" $name "* && -n $other ]] && (($(vercmp "$other" "${HELD_FROM[$name]}") > 0)); then
+    messages+=("$name: ${where[$name]} has $other, newer than the held-back ${HELD_FROM[$name]}; to try it, drop it from IgnorePkg in $SNIPPET")
+  fi
+done
+
 for name in "${!ours[@]}"; do
   mine=${ours[$name]}
   other=${newest[$name]:-}
