@@ -17,9 +17,10 @@
 REPO=local-patched
 SNIPPET=/etc/pacman.d/custom-repos.conf
 
-# Held-back package and the build it was held back from (see IgnorePkg in
-# custom-repos.conf). The other Mesa packages share mesa's version.
-declare -A HELD_FROM=([mesa]=1:26.3.1-2)
+# Held-back package and the upstream version it was held back from (see IgnorePkg in
+# custom-repos.conf). No pkgrel: vercmp then ignores rebuilds of the same
+# version. The other Mesa packages share mesa's version.
+declare -A HELD_FROM=([mesa]=1:26.3.1)
 
 warn() {
   echo -e "\e[33m\nLocally patched packages need attention:\e[0m"
