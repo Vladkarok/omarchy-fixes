@@ -41,6 +41,11 @@ o.window({
 -- Esc and picking an emoji still close it.
 o.window([[^(emote)$]], { stay_focused = true, center = true })
 
+-- Wine's X11 window class. Up to GE-Proton11-12 every window without a
+-- SteamAppId (our launcher sets none) was "steam_proton"; since 11-13 it is the
+-- lowercased exe name (lastwar.exe, lastwarlauncher.exe, ...). Match both.
+local lastwar_class = [[^(steam_proton|lastwar[a-z]*\.exe)$]]
+
 -- Last War on workspace 5. Its auxiliary window has an empty title and belongs
 -- with xclicker on workspace 15.
 --
@@ -48,7 +53,7 @@ o.window([[^(emote)$]], { stay_focused = true, center = true })
 -- top-left corner and otherwise has to be tiled by hand with SUPER + T. This is
 -- the "tile on" rule that the windows.conf -> windows.lua migration dropped.
 o.window({ title = [[^(Last War-Survival Game)$]] }, { workspace = "5 silent", float = false })
-o.window({ class = [[^(steam_proton)$]], title = [[Last War]] }, { workspace = "5 silent", float = false })
+o.window({ class = lastwar_class, title = [[Last War]] }, { workspace = "5 silent", float = false })
 
 -- "no_max_size" is load-bearing since Hyprland 0.57 (2026-10-29). Wine pins the
 -- game window to a fixed size (WM_NORMAL_HINTS min == max), and dwindle floats
@@ -56,22 +61,23 @@ o.window({ class = [[^(steam_proton)$]], title = [[Last War]] }, { workspace = "
 -- has already been applied. 0.56 compared the raw X11 pixels (2560x1552 at
 -- scale 2), so the check never fired; 0.57 divides by the scale (1280x776), so
 -- any launch with a smaller saved size no longer fits the 1280x776 slot.
-o.window({ class = [[^(steam_proton)$]], title = [[^(Last War-Survival Game)$]] }, { no_max_size = true })
+o.window({ class = lastwar_class, title = [[^(Last War-Survival Game)$]] }, { no_max_size = true })
 
 -- The vendor launcher (Rust/Iced) maps before the game and respawns while it
 -- runs, so pin it to workspace 5 rather than letting it land on whatever
 -- workspace happens to be focused. Deliberately left floating: tiling it would
 -- split workspace 5 with the game.
-o.window({ class = [[^(steam_proton)$]], title = [[^(Launcher - Iced)$]] }, { workspace = "5 silent", float = true })
+o.window({ class = lastwar_class, title = [[^(Launcher - Iced)$]] }, { workspace = "5 silent", float = true })
 
 -- Hyprland stops sending frame callbacks to windows on hidden workspaces, so a
 -- Proton game blocks in vkQueuePresent and its loading stalls (and comes up
 -- broken) unless workspace 5 stays on screen. Keep them ticking at
 -- misc:render_unfocused_fps (15) while hidden.
-o.window({ class = [[^(steam_proton|steam_app_.*)$]] }, { render_unfocused = true })
+o.window({ class = lastwar_class }, { render_unfocused = true })
+o.window({ class = [[^(steam_app_.*)$]] }, { render_unfocused = true })
 
 o.window({ class = [[^(xclicker)$]] }, { workspace = "15 silent" })
-o.window({ class = [[^(steam_proton)$]], title = [[^$]] }, { workspace = "15 silent" })
+o.window({ class = lastwar_class, title = [[^$]] }, { workspace = "15 silent" })
 
 -- Telegram's image viewer is a separate window with the SAME class as the chat
 -- window, so it inherits the group rule above and hijacks the group: fullscreen
